@@ -13,11 +13,11 @@ QuickBounds is a spatial partitioning system for Roblox that efficiently detects
 local zone = QuickBounds.addFromInstance(workspace.MyZonePart)
 zone.watchGroups("Players")  --make this zone watch any object with the "Players" group
 
-QuickBounds.onEntered("Players", function(player)
+QuickBounds.onEntered("Players", function(_, player)
     print(player.Name .. " entered the zone!")
 end)
 
-QuickBounds.onExited("Players", function(player)
+QuickBounds.onExited("Players", function(_, player)
     print(player.Name .. " exited the zone!")
 end)
 
