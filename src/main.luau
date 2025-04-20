@@ -239,8 +239,6 @@ type Zone = {
 
 --[=[
     @class QuickBounds
-    A spatial partitioning system for efficiently detecting when objects enter or exit defined zones.
-    Uses a Bounding Volume Hierarchy for optimized spatial queries.
 ]=]
 local QuickBounds = {}
 
