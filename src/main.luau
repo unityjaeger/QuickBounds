@@ -254,20 +254,20 @@ do
 	local lastProcessedPart = nil
 	RunService.PostSimulation:Connect(function()
 		local runTime = 0
-		
+
 		while runTime < frameBudget do
 			local part, data = next(partData, lastProcessedPart)
-			
+
 			lastProcessedPart = part
 			if not lastProcessedPart then
 				break
 			end
-			
+
 			local groups = data.groups
 			local customData = data.customData
 
 			local insideOf = {}
-			
+
 			local startTime = os.clock()
 			local firstOccurence = false
 			pointIntersection(tree, part.Position, function(nodeId)
@@ -275,7 +275,7 @@ do
 					runTime += (os.clock() - startTime)
 					firstOccurence = true
 				end
-				
+
 				local zoneWatching = watching[nodeId]
 
 				for _, group in zoneWatching do
@@ -560,6 +560,86 @@ end
 ]=]
 function QuickBounds.setFrameBudgetMs(budget: number)
 	frameBudget = budget / 1000
+end
+
+--[=[
+    @function getGroupsForPart
+    @within QuickBounds
+    @param part BasePart
+    @return {Group}
+    
+    Get all groups that the part is inside of.
+]=]
+function QuickBounds.getGroupsForPart(part: BasePart): {Groups}
+	local data = partData[part]
+
+	local groups = {}
+	if data then
+		for group, state in data.groups do
+			if state then
+				table.insert(groups, group)
+			end
+		end
+	end
+	
+	return groups
+end
+
+--[=[
+    @function isPartInGroup
+    @within QuickBounds
+    @param part BasePart
+    @param group Groups
+    @return boolean
+    
+    Checks whether a part is inside of a certain group.
+]=]
+function QuickBounds.isPartInGroup(part: BasePart, group: Groups): boolean
+	local data = partData[part]
+	
+	if not data then
+		return false
+	end
+	
+	return data.groups[group] == true
+end
+
+--[=[
+    @function getPartsForGroup
+    @within QuickBounds
+    @param group Groups
+    @return {BasePart}
+    
+    Get all parts that the group contains.
+]=]
+function QuickBounds.getPartsForGroup(group: Groups): {BasePart}
+	local parts = {}
+	
+	for part, data in partData do
+		if data.groups[group] then
+			table.insert(parts, part)
+		end
+	end
+	
+	return parts
+end
+
+--[=[
+    @function getCustomPartData
+    @within QuickBounds
+    @param part BasePart
+    @param group Groups
+    @return any?
+    
+    Get the custom part data associated with a group.
+]=]
+function QuickBounds.getCustomPartData(part: BasePart, group: Groups): any?
+	local data = partData[part]
+	if not data then
+		return nil
+	end
+	
+	return data.customData[group]
 end
 
 Players.PlayerAdded:Connect(function(player)

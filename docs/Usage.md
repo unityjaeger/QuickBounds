@@ -48,6 +48,32 @@ QuickBounds.onExited("Example", function(part)
 end)
 ```
 
+## Fetching Things Manually
+You can get all parts that a group contains like so:
+
+```lua
+for _, rootPart in QuickBounds.getPartsForGroup("Players") do
+    --access the custom data associated with the rootpart, which is the Player object
+    local player = QuickBounds.getCustomPartData(player, "Players")
+    print(player)
+end
+```
+
+You can also get all groups that a part is inside of with getGroupsForPart
+
+```lua
+for _, group in QuickBounds.getGroupsForPart(workspace.Example) do
+    --...
+end
+```
+
+If you just want to check if a part is inside of a single zone, you can use isPartInGroup, as it is more performant
+```lua
+local character = player.Character
+--we use the humanoidrootpart, since that is the part that actually gets associated with the Players group
+local isInside = QuickBounds.isPartInGroup(character.HumanoidRootPart, "Players")
+```
+
 ## Frame Budget
 You can define the maximum frame time that the module will use up per frame to process zones. The time is passed in milliseconds and the default time is 0.2 milliseconds. This frame budget **ONLY** cares about the checking of which zone a part is in, and does not include the time your callbacks take to run. As such, it is recommended to keep it at a low number, like the default 0.2 milliseconds.
 

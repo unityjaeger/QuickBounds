@@ -8,7 +8,17 @@ sidebar_position: 1
 QuickBounds is a spatial partitioning system for Roblox that efficiently detects when objects enter or exit defined zones. It uses a Bounding Volume Hierarchy with Morton Codes for optimized spatial queries, making it suitable for large-scale applications.
 
 ## Installation
-Just grab the latest release from the [Releases](https://github.com/unityjaeger/QuickBounds/releases) tab.
+If you use wally, then put this in your wally.toml
+```
+QuickBounds = "unityjaeger/quickbounds@0.1.0"
+```
+
+Alternatively, if you use pesde, then you can install it like this:
+```
+pesde add unityjaeger/quickbounds
+```
+
+Or if you want the source, then just grab it from the latest release from the [Releases](https://github.com/unityjaeger/QuickBounds/releases) tab.
 
 ## Quick Start
 ```lua
