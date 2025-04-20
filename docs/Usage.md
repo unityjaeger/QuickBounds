@@ -49,7 +49,7 @@ end)
 ```
 
 ## Frame Budget
-You can define the maximum frame time that the module will use up per frame to process zones. The time is passed in milliseconds and the default time is 0.25 milliseconds.
+You can define the maximum frame time that the module will use up per frame to process zones. The time is passed in milliseconds and the default time is 0.2 milliseconds. This frame budget **ONLY** cares about the checking of which zone a part is in, and does not include the time your callbacks take to run. As such, it is recommended to keep it at a low number, like the default 0.2 milliseconds.
 
 ```lua
 zoner.setFrameBudgetMs(1) --1 millisecond

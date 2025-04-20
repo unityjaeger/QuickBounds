@@ -248,18 +248,36 @@ local watching = {}
 local partData = {}
 local callbacks = {}
 
-local tree: Node
+local tree: Node = nil
 local pendingDelete = false
 
+local frameBudget = .0002
 do
+	local lastProcessedPart = nil
 	RunService.PostSimulation:Connect(function()
-		for part, data in partData do
+		local runTime = 0
+		
+		while runTime < frameBudget do
+			local part, data = next(partData, lastProcessedPart)
+			
+			lastProcessedPart = part
+			if not lastProcessedPart then
+				break
+			end
+			
 			local groups = data.groups
 			local customData = data.customData
 
 			local insideOf = {}
-
+			
+			local startTime = os.clock()
+			local firstOccurence = false
 			pointIntersection(tree, part.Position, function(nodeId)
+				if not firstOccurence then
+					runTime += (os.clock() - startTime)
+					firstOccurence = true
+				end
+				
 				local zoneWatching = watching[nodeId]
 
 				for _, group in zoneWatching do
@@ -533,6 +551,17 @@ end
 function Zoner.onExited(group: Groups, callback: (Part | any) -> ())
 	callbacks[group] = callbacks[group] or {entered = {}, exited = {}}
 	table.insert(callbacks[group].exited, callback)
+end
+
+--[=[
+    @function setFrameBudgetMs
+    @within Zoner
+    @param budget number
+    
+    Set the target frame budget in milliseconds.
+]=]
+function Zoner.setFrameBudgetMs(budget: number)
+	frameBudget = budget / 1000
 end
 
 Players.PlayerAdded:Connect(function(player)
