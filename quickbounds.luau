@@ -223,7 +223,7 @@ local Players = game:GetService("Players")
 
 --[=[
     @type Groups "Players" | string
-    @within Zoner
+    @within QuickBounds
 ]=]
 type Groups = "Players" | string
 
@@ -238,11 +238,11 @@ type Zone = {
 }
 
 --[=[
-    @class Zoner
+    @class QuickBounds
     A spatial partitioning system for efficiently detecting when objects enter or exit defined zones.
     Uses a Bounding Volume Hierarchy for optimized spatial queries.
 ]=]
-local Zoner = {}
+local QuickBounds = {}
 
 local watching = {}
 local partData = {}
@@ -385,7 +385,7 @@ end
 
 --[=[
     @function add
-    @within Zoner
+    @within QuickBounds
     @param cframe CFrame
     @param size Vector3
     @param shape "Cube" | "Cylinder" | "Sphere"
@@ -393,7 +393,7 @@ end
 
     Requires a rebuild for the zone to start working as intended.
 ]=]
-function Zoner.add(cframe: CFrame, size: Vector3, shape: "Cube" | "Cylinder" | "Sphere"): Zone
+function QuickBounds.add(cframe: CFrame, size: Vector3, shape: "Cube" | "Cylinder" | "Sphere"): Zone
 	local halfSize = size / 2
 	local object: Object = {
 		Position = cframe.Position,
@@ -433,13 +433,13 @@ end
 
 --[=[
     @function addFromInstance
-    @within Zoner
+    @within QuickBounds
     @param part BasePart
     @return Zone
 
     Requires a rebuild for the zone to start working as intended.
 ]=]
-function Zoner.addFromInstance(part: BasePart): Zone
+function QuickBounds.addFromInstance(part: BasePart): Zone
 	local objectShape = "Cube"
 
 	if part:IsA("Part") then
@@ -455,16 +455,16 @@ function Zoner.addFromInstance(part: BasePart): Zone
 		end
 	end
 
-	return Zoner.add(part.CFrame, part.Size, objectShape)
+	return QuickBounds.add(part.CFrame, part.Size, objectShape)
 end
 
 --[=[
     @function rebuild
-    @within Zoner
+    @within QuickBounds
 
     Reconstructs the BVH based on the current zones, this is required after any structural change.
 ]=]
-function Zoner.rebuild()
+function QuickBounds.rebuild()
 	assert(#objects > 0 or pendingDelete, "nothing to rebuild, no zones registered")
 	tree = createBVH() :: Node
 	pendingDelete = false
@@ -472,14 +472,14 @@ end
 
 --[=[
     @function assignToGroup
-    @within Zoner
+    @within QuickBounds
     @param group string
     @param part BasePart 
     @param callbackData any? --optional data to pass to callbacks
 
     Associates a BasePart with a group, if callbackData is specified, then it is specific to that group.
 ]=]
-function Zoner.assignToGroup(group: Groups, part: BasePart, callbackData: any?)
+function QuickBounds.assignToGroup(group: Groups, part: BasePart, callbackData: any?)
 	if partData[part] then
 		partData[part].groups[group] = false
 		partData[part].customData[group] = callbackData
@@ -499,13 +499,13 @@ end
 
 --[=[
     @function removeFromGroup
-    @within Zoner
+    @within QuickBounds
     @param group string
     @param part BasePart
 
     Removes a BasePart from a group, if the BasePart is not a member of any group after this operation, it gets cleaned up.
 ]=]
-function Zoner.removeFromGroup(group: Groups, part: BasePart)
+function QuickBounds.removeFromGroup(group: Groups, part: BasePart)
 	if not partData[part] then
 		return
 	end
@@ -519,56 +519,56 @@ end
 
 --[=[
     @function onEntered
-    @within Zoner
+    @within QuickBounds
     @param group Groups
     @param callback function
     
     ```lua
     --parts internally registered to the "Players" group pass the Player object as the second argument in the callback
-    Zoner.onEntered("Players", function(_, player)
+    QuickBounds.onEntered("Players", function(_, player)
         print(player.Name .. " entered a zone!")
     end)
     ```
 ]=]
-function Zoner.onEntered(group: Groups, callback: (Part | any) -> ())
+function QuickBounds.onEntered(group: Groups, callback: (Part | any) -> ())
 	callbacks[group] = callbacks[group] or {entered = {}, exited = {}}
 	table.insert(callbacks[group].entered, callback)
 end
 
 --[=[
     @function onExited
-    @within Zoner
+    @within QuickBounds
     @param group Groups
     @param callback function
     
     ```lua
     --parts internally registered to the "Players" group pass the Player object as the second argument in the callback
-    Zoner.onExited("Players", function(_, player)
+    QuickBounds.onExited("Players", function(_, player)
         print(player.Name .. " exited a zone!")
     end)
     ```
 ]=]
-function Zoner.onExited(group: Groups, callback: (Part | any) -> ())
+function QuickBounds.onExited(group: Groups, callback: (Part | any) -> ())
 	callbacks[group] = callbacks[group] or {entered = {}, exited = {}}
 	table.insert(callbacks[group].exited, callback)
 end
 
 --[=[
     @function setFrameBudgetMs
-    @within Zoner
+    @within QuickBounds
     @param budget number
     
     Set the target frame budget in milliseconds.
 ]=]
-function Zoner.setFrameBudgetMs(budget: number)
+function QuickBounds.setFrameBudgetMs(budget: number)
 	frameBudget = budget / 1000
 end
 
 Players.PlayerAdded:Connect(function(player)
 	player.CharacterAdded:Connect(function(character)
 		local humanoidRootPart = character.HumanoidRootPart
-		Zoner.assignToGroup("Players", humanoidRootPart, player)
+		QuickBounds.assignToGroup("Players", humanoidRootPart, player)
 	end)
 end)
 
-return Zoner
+return QuickBounds

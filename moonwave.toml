@@ -1,5 +1,5 @@
-title = "Zoner"  # From Git
-gitRepoUrl = "https://github.com/unityjaeger/Zoner" # From Git
+title = "QuickBounds"  # From Git
+gitRepoUrl = "https://github.com/unityjaeger/QuickBounds" # From Git
 
 gitSourceBranch = "main"
 changelog = false
@@ -22,6 +22,6 @@ description = "Supports Cubes, Spheres and Cylinders"
 
 # From git:
 organizationName = "unityjaeger"
-projectName = "Zoner"
+projectName = "QuickBounds"
 url = "https://github.com/unityjaeger"
-baseUrl = "/Zoner/"
+baseUrl = "/QuickBounds/"

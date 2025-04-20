@@ -8,28 +8,28 @@ sidebar_position: 2
 Zones can be created in two ways, either using addFromInstance or just add, addFromInstance gets the shape of the Instance passed to the function and calls add behind the scenes.
 
 ```lua
-local cubeZone = zoner.add(CFrame.new(0, 10, 0), Vector3.new(10, 10, 10), "Cube")
+local cubeZone = QuickBounds.add(CFrame.new(0, 10, 0), Vector3.new(10, 10, 10), "Cube")
 
-local sphereZone = zoner.addFromInstance(workspace.SphereZone)
+local sphereZone = QuickBounds.addFromInstance(workspace.SphereZone)
 ```
 
 ## Managing Objects
 Objects can be added with assignToGroup.
 
 ```lua
-zoner.assignToGroup("Example", workspace.Part)
+QuickBounds.assignToGroup("Example", workspace.Part)
 ```
 
 The objects added this way automatically get cleaned up when the object is destroyed, however you can still manually remove an object from a group.
 
 ```lua
-zoner.removeFromGroup("Example", workspace.Part)
+QuickBounds.removeFromGroup("Example", workspace.Part)
 ```
 
 Objects can also be part of multiple groups, which just requires additional calls to the assignToGroup function. assignToGroup also has an optional third parameter that lets you define a custom value to return alongside the part in the callback function for onEntered and onExited. This is mainly so that associating data with parts is easier without having to maintain custom data structures. The custom data is specific to the group that the part was added to, so if you want it to have the same data for every group you would need to call the function with your custom data each time.
 
 ```lua
-zoner.assignToGroup("Example", workspace.Part, "Value") --the second parameter in the callback function will now be "Value" for this part
+QuickBounds.assignToGroup("Example", workspace.Part, "Value") --the second parameter in the callback function will now be "Value" for this part
 ```
 
 ### Rebuilding
@@ -39,11 +39,11 @@ The BVH tree needs to be rebuilt every time a zone gets added or removed, otherw
 onEntered and onExited allow you to define any number of callbacks to listen to objects moving in or out of a zone.
 
 ```lua
-zoner.onEntered("Example", function(part, customData)
+QuickBounds.onEntered("Example", function(part, customData)
     print(part, "entered zone, with data", customData) --if we take the object defined above, this will print "Part entered zone, with data Value"
 end)
 
-zoner.onExited("Example", function(part)
+QuickBounds.onExited("Example", function(part)
     print(part, "exited zone")
 end)
 ```
@@ -52,7 +52,7 @@ end)
 You can define the maximum frame time that the module will use up per frame to process zones. The time is passed in milliseconds and the default time is 0.2 milliseconds. This frame budget **ONLY** cares about the checking of which zone a part is in, and does not include the time your callbacks take to run. As such, it is recommended to keep it at a low number, like the default 0.2 milliseconds.
 
 ```lua
-zoner.setFrameBudgetMs(1) --1 millisecond
+QuickBounds.setFrameBudgetMs(1) --1 millisecond
 ```
 
 ## Additional Information
