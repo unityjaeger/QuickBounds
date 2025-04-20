@@ -7,6 +7,9 @@ sidebar_position: 1
 ## Overview
 QuickBounds is a spatial partitioning system for Roblox that efficiently detects when objects enter or exit defined zones. It uses a Bounding Volume Hierarchy with Morton Codes for optimized spatial queries, making it suitable for large-scale applications.
 
+## Installation
+Just grab the latest release from the [Releases](https://github.com/unityjaeger/QuickBounds/releases) tab.
+
 ## Quick Start
 ```lua
 --create a zone
