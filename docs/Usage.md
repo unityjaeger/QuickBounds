@@ -26,11 +26,14 @@ The objects added this way automatically get cleaned up when the object is destr
 zoner.removeFromGroup("Example", workspace.Part)
 ```
 
-Objects can also be part of multiple groups, which just requires additional calls to the assignToGroup function. assignToGroup also has an optional third parameter that lets you define a custom value to return in the callback function for onEntered and onExited. This is mainly so that associating data with parts is easier without having to maintain custom data structures.
+Objects can also be part of multiple groups, which just requires additional calls to the assignToGroup function. assignToGroup also has an optional third parameter that lets you define a custom value to return alongside the part in the callback function for onEntered and onExited. This is mainly so that associating data with parts is easier without having to maintain custom data structures. The custom data is specific to the group that the part was added to, so if you want it to have the same data for every group you would need to call the function with your custom data each time.
 
 ```lua
 zoner.assignToGroup("Example", workspace.Part, "Value") --the second parameter in the callback function will now be "Value" for this part
 ```
+
+### Rebuilding
+The BVH tree needs to be rebuilt every time a zone gets added or removed, otherwise it operates on old data. This shouldn't be done excessively but the performance cost is not too bad with a low zone count. If possible, try batching together zone removals and additions and then calling rebuild. (for reference, rebuilding a tree with 500 zones costs ~0.5ms)
 
 ## Detecting Zone Entry/Exit
 onEntered and onExited allow you to define any number of callbacks to listen to objects moving in or out of a zone.
@@ -45,7 +48,15 @@ zoner.onExited("Example", function(part)
 end)
 ```
 
+## Frame Budget
+You can define the maximum frame time that the module will use up per frame to process zones. The time is passed in milliseconds and the default time is 0.25 milliseconds.
+
+```lua
+zoner.setFrameBudgetMs(1) --1 millisecond
+```
+
 ## Additional Information
 - Only having one Zone per tag is completely fine.
 - This module can handle querying a lot of zones, but it is always a trade off if you want optimal performance, either a lot of objects or a lot of zones.
 - There is a predefined "Players" group that gets handled by the module.
+- Parts only get their center checked against the zones for optimization.

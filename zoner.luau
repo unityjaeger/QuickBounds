@@ -255,7 +255,7 @@ do
 	RunService.PostSimulation:Connect(function()
 		for part, data in partData do
 			local groups = data.groups
-			local callbackOverwrite = data.callbackOverwrite
+			local customData = data.customData
 
 			local insideOf = {}
 
@@ -264,6 +264,7 @@ do
 
 				for _, group in zoneWatching do
 					local currentState = groups[group]
+					local overwrite = customData[group]
 
 					if currentState ~= nil then
 						insideOf[group] = true
@@ -273,9 +274,8 @@ do
 
 							local groupCallbacks = callbacks[group]
 							if groupCallbacks then
-								local toPass = callbackOverwrite or part
 								for _, callback in groupCallbacks.entered do
-									task.spawn(callback, toPass)
+									task.spawn(callback, part, overwrite)
 								end
 							end
 						end
@@ -288,10 +288,10 @@ do
 					groups[group] = false
 
 					local groupCallbacks = callbacks[group]
+					local overwrite = customData[group]
 					if groupCallbacks then
-						local toPass = callbackOverwrite or part
 						for _, callback in groupCallbacks.exited do
-							task.spawn(callback, toPass)
+							task.spawn(callback, part, overwrite)
 						end
 					end
 				end
@@ -457,28 +457,25 @@ end
     @within Zoner
     @param group string
     @param part BasePart 
-    @param callbackOverwrite any? --optional data to pass to callbacks instead of the part itself
+    @param callbackData any? --optional data to pass to callbacks
 
-    Associates a BasePart with a group.
+    Associates a BasePart with a group, if callbackData is specified, then it is specific to that group.
 ]=]
-function Zoner.assignToGroup(group: Groups, part: BasePart, callbackOverwrite: any?)
+function Zoner.assignToGroup(group: Groups, part: BasePart, callbackData: any?)
 	if partData[part] then
 		partData[part].groups[group] = false
+		partData[part].customData[group] = callbackData
 	else
-		partData[part] = {groups = {[group] = false}}
-	end
-
-	if callbackOverwrite then
-		partData[part].callbackOverwrite = callbackOverwrite
-	end
-	
-	if not partData[part].connection then
-		partData[part].connection = part.AncestryChanged:Connect(function(_, newParent)
-			if newParent == nil then
-				partData[part].connection:Disconnect()
-				partData[part] = nil
-			end
-		end)
+		partData[part] = {
+			groups = {[group] = false},
+			connection = part.AncestryChanged:Connect(function(_, newParent)
+				if newParent == nil then
+					partData[part].connection:Disconnect()
+					partData[part] = nil
+				end
+			end),
+			customData = {[group] = callbackData}
+		}
 	end
 end
 
@@ -509,8 +506,8 @@ end
     @param callback function
     
     ```lua
-    --parts internally registered to the "Players" group overwrite the callback data to pass the respective Player object instead of the characters' HumanoidRootPart
-    Zoner.onEntered("Players", function(player)
+    --parts internally registered to the "Players" group pass the Player object as the second argument in the callback
+    Zoner.onEntered("Players", function(_, player)
         print(player.Name .. " entered a zone!")
     end)
     ```
@@ -527,8 +524,8 @@ end
     @param callback function
     
     ```lua
-    --parts internally registered to the "Players" group overwrite the callback data to pass the respective Player object instead of the characters' HumanoidRootPart
-    Zoner.onExited("Players", function(player)
+    --parts internally registered to the "Players" group pass the Player object as the second argument in the callback
+    Zoner.onExited("Players", function(_, player)
         print(player.Name .. " exited a zone!")
     end)
     ```
