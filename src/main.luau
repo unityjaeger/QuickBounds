@@ -16,7 +16,7 @@ type Node = {
 }
 
 type Object = {
-	Shape: "Cube" | "Ball" | "Cylinder",
+	Shape: "Box" | "Ball" | "Cylinder",
 	Position: Vector3,
 	CFrame: CFrame,
 	HalfSize: Vector3,
@@ -188,7 +188,7 @@ local function pointIntersection(node: Node, point: Vector3, callback: (nodeId: 
 	if node.id > 0 then
 		local object = objects[node.id]
 
-		if object.Shape == "Cube" then
+		if object.Shape == "Box" then
 			local localPoint = vector.abs(object.CFrame:PointToObjectSpace(point))
 			if vector.min(localPoint, object.HalfSize) == localPoint then
 				callback(node.id)
@@ -386,12 +386,12 @@ end
     @within QuickBounds
     @param cframe CFrame
     @param size Vector3
-    @param shape "Cube" | "Cylinder" | "Sphere"
+    @param shape "Box" | "Cylinder" | "Sphere"
     @return Zone
 
     Requires a rebuild for the zone to start working as intended.
 ]=]
-function QuickBounds.add(cframe: CFrame, size: Vector3, shape: "Cube" | "Cylinder" | "Sphere"): Zone
+function QuickBounds.add(cframe: CFrame, size: Vector3, shape: "Box" | "Cylinder" | "Sphere"): Zone
 	local halfSize = size / 2
 	local object: Object = {
 		Position = cframe.Position,
@@ -438,7 +438,7 @@ end
     Requires a rebuild for the zone to start working as intended.
 ]=]
 function QuickBounds.addFromInstance(part: BasePart): Zone
-	local objectShape = "Cube"
+	local objectShape = "Box"
 
 	if part:IsA("Part") then
 		local shape = part.Shape
