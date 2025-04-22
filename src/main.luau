@@ -15,11 +15,32 @@ type Node = {
 	id: number
 }
 
-type Object = {
+--[=[
+	@interface BoundingVolume 
+	@field Shape "Box" | "Ball" | "Cylinder",
+	@field Position Vector3,
+	@field CFrame CFrame,
+	@field HalfSize Vector3,
+	@field Index number,
+	@field MortonCode number,
+	@field radius number?,
+	@field start Vector3?,
+	@field axis Vector3?,
+	@field axisLength number?,
+	@field radiusSquared number?
+	
+	Internal object that the BVH interacts with, only ever exposed through getAllZonesForGroup.
+
+	@within QuickBounds
+]=]
+type BoundingVolume = {
 	Shape: "Box" | "Ball" | "Cylinder",
 	Position: Vector3,
 	CFrame: CFrame,
 	HalfSize: Vector3,
+
+	Index: number,
+	MortonCode: number,
 
 	--for the sphere
 	radius: number?,
@@ -31,7 +52,7 @@ type Object = {
 	radiusSquared: number?
 }
 
-local objects: {Object} = {}
+local objects: {BoundingVolume} = {}
 local holes = {}
 
 local function unionBounds(nodeA: Node, nodeB: Node): (Vector3, Vector3)
@@ -40,7 +61,7 @@ local function unionBounds(nodeA: Node, nodeB: Node): (Vector3, Vector3)
 	return vector.min(nodeA.min, nodeB.min), vector.max(nodeA.max, nodeB.max)
 end
 
-local function getObjectBounds(object: Object): (Vector3, Vector3)
+local function getObjectBounds(object: BoundingVolume): (Vector3, Vector3)
 	local halfSize = object.HalfSize
 	local cframe = object.CFrame
 	local center = object.Position
@@ -247,12 +268,17 @@ local partData = {}
 local callbacks = {}
 
 local tree: Node = nil
-local pendingDelete = false
+local pendingRebuild = false
 
 local frameBudget = .0002
 do
 	local lastProcessedPart = nil
 	RunService.PostSimulation:Connect(function()
+		if pendingRebuild then
+			tree = createBVH()
+			pendingRebuild = false
+		end
+
 		local runTime = 0
 
 		while runTime < frameBudget do
@@ -343,8 +369,9 @@ local function removeZone(zone: Zone): ()
 	else
 		table.remove(objects)
 	end
-
-	pendingDelete = true
+	
+	table.clear(zone)
+	pendingRebuild = true
 end
 
 --[=[
@@ -393,7 +420,7 @@ end
 ]=]
 function QuickBounds.add(cframe: CFrame, size: Vector3, shape: "Box" | "Cylinder" | "Sphere"): Zone
 	local halfSize = size / 2
-	local object: Object = {
+	local object: BoundingVolume = {
 		Position = cframe.Position,
 		CFrame = cframe,
 		HalfSize = halfSize,
@@ -420,6 +447,7 @@ function QuickBounds.add(cframe: CFrame, size: Vector3, shape: "Box" | "Cylinder
 
 	local index = insert(object)
 	watching[index] = {}
+	pendingRebuild = true
 
 	return {
 		_index = index,
@@ -454,18 +482,6 @@ function QuickBounds.addFromInstance(part: BasePart): Zone
 	end
 
 	return QuickBounds.add(part.CFrame, part.Size, objectShape)
-end
-
---[=[
-    @function rebuild
-    @within QuickBounds
-
-    Reconstructs the BVH based on the current zones, this is required after any structural change.
-]=]
-function QuickBounds.rebuild()
-	assert(#objects > 0 or pendingDelete, "nothing to rebuild, no zones registered")
-	tree = createBVH() :: Node
-	pendingDelete = false
 end
 
 --[=[
@@ -520,6 +536,7 @@ end
     @within QuickBounds
     @param group Groups
     @param callback function
+    @return () -> () --a function that if called will disconnect the callback
     
     ```lua
     --parts internally registered to the "Players" group pass the Player object as the second argument in the callback
@@ -528,9 +545,21 @@ end
     end)
     ```
 ]=]
-function QuickBounds.onEntered(group: Groups, callback: (Part | any) -> ())
-	callbacks[group] = callbacks[group] or {entered = {}, exited = {}}
+function QuickBounds.onEntered(group: Groups, callback: (Part | any) -> ()): () -> ()
+	if not callbacks[group] then
+		callbacks[group] = {entered = {}, exited = {}}
+	end
+
 	table.insert(callbacks[group].entered, callback)
+	local index = #callbacks[group].entered
+
+	return function()
+		callbacks[group].entered[index] = nil
+		if #callbacks[group].entered + #callbacks[group].exited == 0 then
+			callbacks[group] = nil
+		end
+		index = nil
+	end
 end
 
 --[=[
@@ -538,6 +567,7 @@ end
     @within QuickBounds
     @param group Groups
     @param callback function
+    @return () -> () --a function that if called will disconnect the callback
     
     ```lua
     --parts internally registered to the "Players" group pass the Player object as the second argument in the callback
@@ -546,9 +576,21 @@ end
     end)
     ```
 ]=]
-function QuickBounds.onExited(group: Groups, callback: (Part | any) -> ())
-	callbacks[group] = callbacks[group] or {entered = {}, exited = {}}
+function QuickBounds.onExited(group: Groups, callback: (Part | any) -> ()): () -> ()
+	if not callbacks[group] then
+		callbacks[group] = {entered = {}, exited = {}}
+	end
+
 	table.insert(callbacks[group].exited, callback)
+	local index = #callbacks[group].exited
+
+	return function()
+		callbacks[group].exited[index] = nil
+		if #callbacks[group].entered + #callbacks[group].exited == 0 then
+			callbacks[group] = nil
+		end
+		index = nil
+	end
 end
 
 --[=[
@@ -566,7 +608,7 @@ end
     @function getGroupsForPart
     @within QuickBounds
     @param part BasePart
-    @return {Group}
+    @return {Groups}
     
     Get all groups that the part is inside of.
 ]=]
@@ -581,7 +623,7 @@ function QuickBounds.getGroupsForPart(part: BasePart): {Groups}
 			end
 		end
 	end
-	
+
 	return groups
 end
 
@@ -596,11 +638,11 @@ end
 ]=]
 function QuickBounds.isPartInGroup(part: BasePart, group: Groups): boolean
 	local data = partData[part]
-	
+
 	if not data then
 		return false
 	end
-	
+
 	return data.groups[group] == true
 end
 
@@ -614,14 +656,32 @@ end
 ]=]
 function QuickBounds.getPartsForGroup(group: Groups): {BasePart}
 	local parts = {}
-	
+
 	for part, data in partData do
 		if data.groups[group] then
 			table.insert(parts, part)
 		end
 	end
-	
+
 	return parts
+end
+
+--[=[
+    @function getAllZonesForGroup
+    @within QuickBounds
+    @param group Groups
+    @return {BoundingVolume}
+    
+    Get all zone objects that are part of a group.
+]=]
+function QuickBounds.getAllZonesForGroup(group: Groups): {BoundingVolume}
+	local gatheredObjects = {}
+	for index, groups in watching do
+		if table.find(groups, group) then
+			table.insert(gatheredObjects, objects[index])
+		end
+	end
+	return gatheredObjects
 end
 
 --[=[
@@ -638,7 +698,7 @@ function QuickBounds.getCustomPartData(part: BasePart, group: Groups): any?
 	if not data then
 		return nil
 	end
-	
+
 	return data.customData[group]
 end
 
