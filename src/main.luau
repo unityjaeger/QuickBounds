@@ -30,6 +30,7 @@ type Node = {
 	@field radiusSquared number?
 	
 	Internal object that the BVH interacts with, only ever exposed through getAllZonesForGroup.
+	Radius is only used for balls and axis, axisLength and radiusSquared are all used for cylinders.
 
 	@within QuickBounds
 ]=]
