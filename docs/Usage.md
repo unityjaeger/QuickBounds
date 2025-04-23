@@ -13,6 +13,20 @@ local cubeZone = QuickBounds.add(CFrame.new(0, 10, 0), Vector3.new(10, 10, 10), 
 local sphereZone = QuickBounds.addFromInstance(workspace.SphereZone)
 ```
 
+## Zone Methods
+You can remove the zone with by calling remove on it:
+```lua
+local zone = QuickBounds.addFromInstance(workspace.Example)
+zone:remove()
+```
+
+To make zones track a group, you can call watchGroups, and to make the zone stop watching a group you can call unwatchGroups, both take tuples as arguments.
+```lua
+local zone = QuickBounds.addFromInstance(workspace.Example)
+zone:watchGroups("Players", "Example")
+zone:unwatchGroups("Example2")
+```
+
 ## Managing Objects
 Objects can be added with assignToGroup.
 
@@ -31,9 +45,6 @@ Objects can also be part of multiple groups, which just requires additional call
 ```lua
 QuickBounds.assignToGroup("Example", workspace.Part, "Value") --the second parameter in the callback function will now be "Value" for this part
 ```
-
-### Rebuilding
-The BVH tree needs to be rebuilt every time a zone gets added or removed, otherwise it operates on old data. This shouldn't be done excessively but the performance cost is not too bad with a low zone count. If possible, try batching together zone removals and additions and then calling rebuild. (for reference, rebuilding a tree with 500 zones costs ~0.5ms)
 
 ## Detecting Zone Entry/Exit
 onEntered and onExited allow you to define any number of callbacks to listen to objects moving in or out of a zone.
@@ -72,6 +83,15 @@ If you just want to check if a part is inside of a single zone, you can use isPa
 local character = player.Character
 --we use the humanoidrootpart, since that is the part that actually gets associated with the Players group
 local isInside = QuickBounds.isPartInGroup(character.HumanoidRootPart, "Players")
+```
+
+To get all zone objects that are part of a group, you can use getAllZonesForGroup, however, this returns the internal structure of the zone used by the BVH.
+```lua
+local zone = QuickBounds.addFromInstance(workspace.Example)
+zone:watchGroups("Players") 
+for _, boundingVolume in QuickBounds.getAllZonesForGroup("Players") do
+    print(boundingVolume.CFrame) --will print the CFrame of workspace.Example, check the BoundingVolume type in the API reference for more info on what zoneData holds
+end
 ```
 
 ## Frame Budget
