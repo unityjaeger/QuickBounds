@@ -24,7 +24,7 @@ Or if you want the source, then just grab it from the latest release from the [R
 ```lua
 --create a zone
 local zone = QuickBounds.addFromInstance(workspace.MyZonePart)
-zone.watchGroups("Players")  --make this zone watch any object with the "Players" group
+zone:watchGroups("Players")  --make this zone watch any object with the "Players" group
 
 QuickBounds.onEntered("Players", function(_, player)
     print(player.Name .. " entered the zone!")
@@ -33,7 +33,4 @@ end)
 QuickBounds.onExited("Players", function(_, player)
     print(player.Name .. " exited the zone!")
 end)
-
---rebuild the BVH tree, needed after structural changes
-QuickBounds.rebuild()
 ```

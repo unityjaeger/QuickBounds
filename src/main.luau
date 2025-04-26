@@ -1,7 +1,6 @@
 --!native
 --!optimize 2
 --i would turn on strict but the vector and Vector3 incompability warnings are annoying
-
 type ListItem = {
 	id: number,
 	mortonCode: number
@@ -370,7 +369,7 @@ local function removeZone(zone: Zone): ()
 	else
 		table.remove(objects)
 	end
-	
+
 	table.clear(zone)
 	pendingRebuild = true
 end
@@ -703,11 +702,22 @@ function QuickBounds.getCustomPartData(part: BasePart, group: Groups): any?
 	return data.customData[group]
 end
 
+local function onCharacterAdded(character)
+	local humanoidRootPart = character.HumanoidRootPart
+	local player = Players:GetPlayerFromCharacter(character)
+	QuickBounds.assignToGroup("Players", humanoidRootPart, player)
+end
+
+for _, player in Players:GetPlayers() do
+	if player.Character then
+		onCharacterAdded(player.Character)
+	end
+	
+	player.CharacterAdded:Connect(onCharacterAdded)
+end
+
 Players.PlayerAdded:Connect(function(player)
-	player.CharacterAdded:Connect(function(character)
-		local humanoidRootPart = character.HumanoidRootPart
-		QuickBounds.assignToGroup("Players", humanoidRootPart, player)
-	end)
+	player.CharacterAdded:Connect(onCharacterAdded)
 end)
 
 return QuickBounds
