@@ -8,7 +8,7 @@ sidebar_position: 2
 Zones can be created in two ways, either using addFromInstance or just add, addFromInstance gets the shape of the Instance passed to the function and calls add behind the scenes.
 
 ```lua
-local cubeZone = QuickBounds.add(CFrame.new(0, 10, 0), Vector3.new(10, 10, 10), "Cube")
+local boxZone = QuickBounds.add(CFrame.new(0, 10, 0), Vector3.new(10, 10, 10), "Box")
 
 local sphereZone = QuickBounds.addFromInstance(workspace.SphereZone)
 ```
