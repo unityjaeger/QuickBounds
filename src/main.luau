@@ -20,8 +20,6 @@ type Node = {
 	@field Position Vector3,
 	@field CFrame CFrame,
 	@field HalfSize Vector3,
-	@field Index number,
-	@field MortonCode number,
 	@field radius number?,
 	@field start Vector3?,
 	@field axis Vector3?,
@@ -38,9 +36,6 @@ type BoundingVolume = {
 	Position: Vector3,
 	CFrame: CFrame,
 	HalfSize: Vector3,
-
-	Index: number,
-	MortonCode: number,
 
 	--for the sphere
 	radius: number?,
