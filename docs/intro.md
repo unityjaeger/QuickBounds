@@ -10,7 +10,7 @@ QuickBounds is a spatial partitioning system for Roblox that efficiently detects
 ## Installation
 If you use wally, then put this in your wally.toml
 ```
-QuickBounds = "unityjaeger/quickbounds@0.2.1"
+QuickBounds = "unityjaeger/quickbounds@0.2.2"
 ```
 
 Alternatively, if you use pesde, then you can install it like this:
