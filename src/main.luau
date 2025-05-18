@@ -16,7 +16,7 @@ type Node = {
 
 --[=[
 	@interface BoundingVolume 
-	@field Shape "Box" | "Ball" | "Cylinder",
+	@field Shape "Box" | "Ball" | "Cylinder" | "Wedge",
 	@field Position Vector3,
 	@field CFrame CFrame,
 	@field HalfSize Vector3,
