@@ -20,6 +20,7 @@ type Node = {
 	@field Position Vector3,
 	@field CFrame CFrame,
 	@field HalfSize Vector3,
+	@field Part BasePart?,
 	@field radius number?,
 	@field start Vector3?,
 	@field axis Vector3?,
@@ -32,10 +33,11 @@ type Node = {
 	@within QuickBounds
 ]=]
 type BoundingVolume = {
-	Shape: "Box" | "Ball" | "Cylinder",
+	Shape: "Box" | "Ball" | "Cylinder" | "Wedge",
 	Position: Vector3,
 	CFrame: CFrame,
 	HalfSize: Vector3,
+	Part: BasePart,
 
 	--for the sphere
 	radius: number?,
@@ -225,6 +227,15 @@ local function pointIntersection(node: Node, point: Vector3, callback: (nodeId: 
 					callback(node.id)
 				end
 			end
+		elseif object.Shape == "Wedge" then
+			local localPoint = object.CFrame:PointToObjectSpace(point)
+			local absolutePoint = vector.abs(localPoint)
+			if vector.min(absolutePoint, object.HalfSize) == absolutePoint then
+				local size = object.HalfSize * 2
+				if localPoint.Y/size.Y - localPoint.Z/size.Z <= 0 then
+					callback(node.id)
+				end
+			end
 		end
 
 		return nil
@@ -312,7 +323,7 @@ do
 							local groupCallbacks = callbacks[group]
 							if groupCallbacks then
 								for _, callback in groupCallbacks.entered do
-									task.spawn(callback, part, overwrite)
+									task.spawn(callback, part, objects[nodeId], overwrite)
 								end
 							end
 						end
@@ -413,7 +424,7 @@ end
 
     Requires a rebuild for the zone to start working as intended.
 ]=]
-function QuickBounds.add(cframe: CFrame, size: Vector3, shape: "Box" | "Cylinder" | "Sphere"): Zone
+function QuickBounds.add(cframe: CFrame, size: Vector3, shape: "Box" | "Cylinder" | "Sphere", associatedPart: BasePart?): Zone
 	local halfSize = size / 2
 	local object: BoundingVolume = {
 		Position = cframe.Position,
@@ -438,6 +449,10 @@ function QuickBounds.add(cframe: CFrame, size: Vector3, shape: "Box" | "Cylinder
 		object.axis = upVector
 		object.axisLength = halfHeight * 2
 		object.radiusSquared = radius * radius
+	end
+	
+	if associatedPart then
+		object.Part = associatedPart
 	end
 
 	local index = insert(object)
@@ -471,12 +486,14 @@ function QuickBounds.addFromInstance(part: BasePart): Zone
 			objectShape = "Sphere"
 		elseif shape == Enum.PartType.Cylinder then
 			objectShape = "Cylinder"
+		elseif shape == Enum.PartType.Wedge then
+			objectShape = "Wedge"
 		else
-			error("part type", shape.Name, "is not supported")
+			error("part type " .. shape.Name .. " is not supported")
 		end
 	end
 
-	return QuickBounds.add(part.CFrame, part.Size, objectShape)
+	return QuickBounds.add(part.CFrame, part.Size, objectShape, part)
 end
 
 --[=[
@@ -540,7 +557,7 @@ end
     end)
     ```
 ]=]
-function QuickBounds.onEntered(group: Groups, callback: (Part | any) -> ()): () -> ()
+function QuickBounds.onEntered(group: Groups, callback: (Part, any?, BoundingVolume) -> ()): () -> ()
 	if not callbacks[group] then
 		callbacks[group] = {entered = {}, exited = {}}
 	end
@@ -571,7 +588,7 @@ end
     end)
     ```
 ]=]
-function QuickBounds.onExited(group: Groups, callback: (Part | any) -> ()): () -> ()
+function QuickBounds.onExited(group: Groups, callback: (Part, any?, BoundingVolume) -> ()): () -> ()
 	if not callbacks[group] then
 		callbacks[group] = {entered = {}, exited = {}}
 	end

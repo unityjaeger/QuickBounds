@@ -50,11 +50,13 @@ QuickBounds.assignToGroup("Example", workspace.Part, "Value") --the second param
 onEntered and onExited allow you to define any number of callbacks to listen to objects moving in or out of a zone.
 
 ```lua
-QuickBounds.onEntered("Example", function(part, customData)
+QuickBounds.onEntered("Example", function(part, customData, zone)
     print(part, "entered zone, with data", customData) --if we take the object defined above, this will print "Part entered zone, with data Value"
+    local zonePart = zone.Part --if the zone was made with addFromInstance, then the Part field exists
+    print(zonePart)
 end)
 
-QuickBounds.onExited("Example", function(part)
+QuickBounds.onExited("Example", function(part, customData)
     print(part, "exited zone")
 end)
 ```
@@ -91,6 +93,7 @@ local zone = QuickBounds.addFromInstance(workspace.Example)
 zone:watchGroups("Players") 
 for _, boundingVolume in QuickBounds.getAllZonesForGroup("Players") do
     print(boundingVolume.CFrame) --will print the CFrame of workspace.Example, check the BoundingVolume type in the API reference for more info on what zoneData holds
+    print(boundingVolume.Part) --since we used addFromInstance, we can access the Part field
 end
 ```
 
