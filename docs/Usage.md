@@ -50,7 +50,7 @@ QuickBounds.assignToGroup("Example", workspace.Part, "Value") --the second param
 onEntered and onExited allow you to define any number of callbacks to listen to objects moving in or out of a zone.
 
 ```lua
-QuickBounds.onEntered("Example", function(part, customData, zone)
+QuickBounds.onEntered("Example", function(part, zone, customData)
     print(part, "entered zone, with data", customData) --if we take the object defined above, this will print "Part entered zone, with data Value"
     local zonePart = zone.Part --if the zone was made with addFromInstance, then the Part field exists
     print(zonePart)
