@@ -63,16 +63,16 @@ local function getObjectBounds(object: BoundingVolume): (Vector3, Vector3)
 	local cframe = object.CFrame
 	local center = object.Position
 
-	local e = vector.abs(cframe.RightVector) * halfSize.X +
+	local halfExtent = vector.abs(cframe.RightVector) * halfSize.X +
 		vector.abs(cframe.UpVector) * halfSize.Y +
 		vector.abs(cframe.LookVector) * halfSize.Z
 
-	return center - e, center + e
+	return center - halfExtent, center + halfExtent
 end
 
---surprisingly not a bottleneck at all
-local function expandBits(value)
-	value = bit32.band(value, 0x3FF)
+local expandLUT = {}
+for i = 0, 1023 do
+	local value = i
 	value = bit32.bor(bit32.lshift(value, 16), value)
 	value = bit32.band(value, 0xFF0000FF)
 	value = bit32.bor(bit32.lshift(value, 8), value)
@@ -81,7 +81,11 @@ local function expandBits(value)
 	value = bit32.band(value, 0x30C30C3)
 	value = bit32.bor(bit32.lshift(value, 2), value)
 	value = bit32.band(value, 0x9249249)
-	return value
+	expandLUT[i] = value
+end
+
+local function expandBits(value)
+	return expandLUT[bit32.band(value, 0x3FF)]
 end
 
 local function positionToMortonCode(position: Vector3, sceneBoundsMin: Vector3, sceneBoundsMax: Vector3): number
