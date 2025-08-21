@@ -27,8 +27,8 @@ type Node = {
 	@field axisLength number?,
 	@field radiusSquared number?
 	
-	Internal object that the BVH interacts with, only ever exposed through getAllZonesForGroup.
-	Radius is only used for balls and axis, axisLength and radiusSquared are all used for cylinders.
+	Internal object that the BVH interacts with, only exposed through getAllZonesForGroup and through the callback in zone.onEntered.
+	Radius is only used for balls while axis, axisLength and radiusSquared are all used for cylinders.
 
 	@within QuickBounds
 ]=]
@@ -37,7 +37,7 @@ type BoundingVolume = {
 	Position: Vector3,
 	CFrame: CFrame,
 	HalfSize: Vector3,
-	Part: BasePart,
+	Part: BasePart?,
 
 	--for the sphere
 	radius: number?,
@@ -70,17 +70,22 @@ local function getObjectBounds(object: BoundingVolume): (Vector3, Vector3)
 	return center - halfExtent, center + halfExtent
 end
 
+local MORTON_SHIFT16_MASK = 0xFF0000FF
+local MORTON_SHIFT8_MASK = 0xF00F00F
+local MORTON_SHIFT4_MASK = 0x30C30C3
+local MORTON_SHIFT2_MASK = 0x9249249
+
 local expandLUT = {}
 for i = 0, 1023 do
 	local value = i
 	value = bit32.bor(bit32.lshift(value, 16), value)
-	value = bit32.band(value, 0xFF0000FF)
+	value = bit32.band(value, MORTON_SHIFT16_MASK)
 	value = bit32.bor(bit32.lshift(value, 8), value)
-	value = bit32.band(value, 0xF00F00F)
+	value = bit32.band(value, MORTON_SHIFT8_MASK)
 	value = bit32.bor(bit32.lshift(value, 4), value)
-	value = bit32.band(value, 0x30C30C3)
+	value = bit32.band(value, MORTON_SHIFT4_MASK)
 	value = bit32.bor(bit32.lshift(value, 2), value)
-	value = bit32.band(value, 0x9249249)
+	value = bit32.band(value, MORTON_SHIFT2_MASK)
 	expandLUT[i] = value
 end
 
@@ -245,8 +250,8 @@ local function pointIntersection(node: Node, point: Vector3, callback: (nodeId: 
 		return nil
 	end
 
-	pointIntersection(node.left, point, callback)
-	pointIntersection(node.right, point, callback)
+	pointIntersection(node.left :: Node, point, callback)
+	pointIntersection(node.right :: Node, point, callback)
 end
 
 local RunService = game:GetService("RunService")
@@ -724,16 +729,77 @@ local function onCharacterAdded(character)
 	QuickBounds.assignToGroup("Players", humanoidRootPart, player)
 end
 
-for _, player in Players:GetPlayers() do
-	if player.Character then
-		onCharacterAdded(player.Character)
-	end
-	
-	player.CharacterAdded:Connect(onCharacterAdded)
+local function onCharacterRemoving(character)
+	local humanoidRootPart = character.HumanoidRootPart
+	QuickBounds.removeFromGroup("Players", humanoidRootPart)
 end
 
-Players.PlayerAdded:Connect(function(player)
-	player.CharacterAdded:Connect(onCharacterAdded)
+local characterAddedConnections: {[Player]: RBXScriptConnection} = {}
+local characterRemovingConnections: {[Player]: RBXScriptConnection} = {}
+
+local playerAddedConnection
+
+function QuickBounds.togglePlayerGroup(boolean)
+	if boolean then
+		if playerAddedConnection then
+			error("'Players' group has already been toggled on")
+		end
+
+		for _, player in Players:GetPlayers() do
+			if player.Character then
+				onCharacterAdded(player.Character)
+			end
+			
+			characterAddedConnections[player] = player.CharacterAdded:Connect(onCharacterAdded)
+			characterRemovingConnections[player] = player.CharacterRemoving:Connect(onCharacterRemoving)
+		end
+
+		playerAddedConnection = Players.PlayerAdded:Connect(function(player)
+			characterAddedConnections[player] = player.CharacterAdded:Connect(onCharacterAdded)
+			characterRemovingConnections[player] = player.CharacterRemoving:Connect(onCharacterRemoving)
+		end)
+	else
+		if not playerAddedConnection then
+			error("'Players' group has not been toggled on")
+		end
+
+		playerAddedConnection:Disconnect()
+		playerAddedConnection = nil
+
+		for player, signal in characterAddedConnections do
+			if player.Character then
+				local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+				if humanoidRootPart then
+					QuickBounds.removeFromGroup("Players", humanoidRootPart)
+				end
+			end
+
+			signal:Disconnect()
+		end
+
+		for player, signal in characterRemovingConnections do
+			signal:Disconnect()
+		end
+
+		table.clear(characterAddedConnections)
+		table.clear(characterRemovingConnections)
+	end
+end
+
+function QuickBounds.isPlayerGroupEnabled(): boolean
+	return playerAddedConnection ~= nil
+end
+
+Players.PlayerRemoving:Connect(function(player)
+	if not characterAddedConnections[player] then
+		return
+	end
+
+	characterAddedConnections[player]:Disconnect()
+	characterRemovingConnections[player]:Disconnect()
+
+	characterAddedConnections[player] = nil
+	characterRemovingConnections[player] = nil
 end)
 
 return QuickBounds
