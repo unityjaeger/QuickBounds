@@ -556,7 +556,7 @@ end
     
     ```lua
     --parts internally registered to the "Players" group pass the Player object as the second argument in the callback
-    QuickBounds.onEntered("Players", function(_, player)
+    QuickBounds.onEntered("Players", function(_, zone, player)
         print(player.Name .. " entered a zone!")
     end)
     ```
