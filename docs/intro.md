@@ -26,7 +26,7 @@ Or if you want the source, then just grab it from the latest release from the [R
 local zone = QuickBounds.addFromInstance(workspace.MyZonePart)
 zone:watchGroups("Players")  --make this zone watch any object with the "Players" group
 
-QuickBounds.onEntered("Players", function(_, player)
+QuickBounds.onEntered("Players", function(_, zone, player)
     print(player.Name .. " entered the zone!")
 end)
 
