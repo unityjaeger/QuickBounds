@@ -739,6 +739,8 @@ local characterRemovingConnections: {[Player]: RBXScriptConnection} = {}
 
 local playerAddedConnection
 
+--TODO: special handling for the Players group since they depend on Player objects not on BaseParts, so the associated BasePart might not exist
+--TODO: streaming enabled support for client usage
 function QuickBounds.togglePlayerGroup(boolean)
 	if boolean then
 		if playerAddedConnection then
