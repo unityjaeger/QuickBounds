@@ -561,7 +561,7 @@ end
     end)
     ```
 ]=]
-function QuickBounds.onEntered(group: Groups, callback: (Part, any?, BoundingVolume) -> ()): () -> ()
+function QuickBounds.onEntered(group: Groups, callback: (Part, BoundingVolume, any?) -> ()): () -> ()
 	if not callbacks[group] then
 		callbacks[group] = {entered = {}, exited = {}}
 	end
