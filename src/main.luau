@@ -592,7 +592,7 @@ end
     end)
     ```
 ]=]
-function QuickBounds.onExited(group: Groups, callback: (Part, any?, BoundingVolume) -> ()): () -> ()
+function QuickBounds.onExited(group: Groups, callback: (Part, any?) -> ()): () -> ()
 	if not callbacks[group] then
 		callbacks[group] = {entered = {}, exited = {}}
 	end
