@@ -18,7 +18,7 @@ description = "Organize zones and trackable objects into logical groups"
 
 [[home.features]]
 title = "Shapes"
-description = "Supports Boxes, Balls and Cylinders"
+description = "Supports Blocks, Balls, Cylinders and Wedges"
 
 # From git:
 organizationName = "unityjaeger"

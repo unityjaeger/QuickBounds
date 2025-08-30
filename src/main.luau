@@ -1,6 +1,10 @@
 --!native
 --!optimize 2
---i would turn on strict but the vector and Vector3 incompability warnings are annoying
+--!strict
+
+local CollectionService = game:GetService("CollectionService")
+local RunService = game:GetService("RunService")
+
 type ListItem = {
 	id: number,
 	mortonCode: number
@@ -14,32 +18,13 @@ type Node = {
 	id: number
 }
 
---[=[
-	@interface BoundingVolume 
-	@field Shape "Box" | "Ball" | "Cylinder" | "Wedge",
-	@field Position Vector3,
-	@field CFrame CFrame,
-	@field HalfSize Vector3,
-	@field Part BasePart?,
-	@field radius number?,
-	@field start Vector3?,
-	@field axis Vector3?,
-	@field axisLength number?,
-	@field radiusSquared number?
-	
-	Internal object that the BVH interacts with, only ever exposed through getAllZonesForGroup.
-	Radius is only used for balls and axis, axisLength and radiusSquared are all used for cylinders.
-
-	@within QuickBounds
-]=]
 type BoundingVolume = {
-	Shape: "Box" | "Ball" | "Cylinder" | "Wedge",
+	Shape: "Block" | "Ball" | "Cylinder" | "Wedge",
 	Position: Vector3,
 	CFrame: CFrame,
 	HalfSize: Vector3,
-	Part: BasePart,
 
-	--for the sphere
+	--for the ball
 	radius: number?,
 
 	--these are all for optimized cylinder calculations...
@@ -50,7 +35,6 @@ type BoundingVolume = {
 }
 
 local objects: {BoundingVolume} = {}
-local holes = {}
 
 local function unionBounds(nodeA: Node, nodeB: Node): (Vector3, Vector3)
 	if not nodeA then return nodeB.min, nodeB.max end
@@ -70,21 +54,26 @@ local function getObjectBounds(object: BoundingVolume): (Vector3, Vector3)
 	return center - halfExtent, center + halfExtent
 end
 
+local MORTON_SHIFT16_MASK = 0xFF0000FF
+local MORTON_SHIFT8_MASK = 0xF00F00F
+local MORTON_SHIFT4_MASK = 0x30C30C3
+local MORTON_SHIFT2_MASK = 0x9249249
+
 local expandLUT = {}
 for i = 0, 1023 do
 	local value = i
 	value = bit32.bor(bit32.lshift(value, 16), value)
-	value = bit32.band(value, 0xFF0000FF)
+	value = bit32.band(value, MORTON_SHIFT16_MASK)
 	value = bit32.bor(bit32.lshift(value, 8), value)
-	value = bit32.band(value, 0xF00F00F)
+	value = bit32.band(value, MORTON_SHIFT8_MASK)
 	value = bit32.bor(bit32.lshift(value, 4), value)
-	value = bit32.band(value, 0x30C30C3)
+	value = bit32.band(value, MORTON_SHIFT4_MASK)
 	value = bit32.bor(bit32.lshift(value, 2), value)
-	value = bit32.band(value, 0x9249249)
+	value = bit32.band(value, MORTON_SHIFT2_MASK)
 	expandLUT[i] = value
 end
 
-local function expandBits(value)
+local function expandBits(value: number): number
 	return expandLUT[bit32.band(value, 0x3FF)]
 end
 
@@ -210,7 +199,7 @@ local function pointIntersection(node: Node, point: Vector3, callback: (nodeId: 
 	if node.id > 0 then
 		local object = objects[node.id]
 
-		if object.Shape == "Box" then
+		if object.Shape == "Block" then
 			local localPoint = vector.abs(object.CFrame:PointToObjectSpace(point))
 			if vector.min(localPoint, object.HalfSize) == localPoint then
 				callback(node.id)
@@ -245,190 +234,89 @@ local function pointIntersection(node: Node, point: Vector3, callback: (nodeId: 
 		return nil
 	end
 
-	pointIntersection(node.left, point, callback)
-	pointIntersection(node.right, point, callback)
+	pointIntersection(node.left :: Node, point, callback)
+	pointIntersection(node.right :: Node, point, callback)
 end
 
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
+--for my own sanity
+type GroupUID = number
+type ZoneIndex = number
 
---[=[
-    @type Groups "Players" | string
-    @within QuickBounds
-]=]
-type Groups = "Players" | string
+export type Shapes = "Block" | "Ball" | "Cylinder" | "Wedge"
+export type Callback = (part: BasePart, zone: Zone, customData: any?) -> ()
 
---[=[
-    @class Zone
-]=]
-type Zone = {
-	_index: number,
-	remove: (zone: Zone) -> (),
-	watchGroups: (zone: Zone, ...Groups) -> (),
-	unwatchGroups: (zone: Zone, ...Groups) -> ()
+export type Zone = {
+	watchGroups: (zone: Zone, ...Group) -> (),
+	unwatchGroups: (zone: Zone, ...Group) -> (),
+	destroy: (zone: Zone) -> (),
+	index: number,
+	part: BasePart?
 }
 
---[=[
-    @class QuickBounds
-]=]
-local QuickBounds = {}
+export type Group = {
+	add: (group: Group, part: BasePart, customData: any?) -> (),
+	remove: (group: Group, part: BasePart) -> (),
+	setPriority: (group: Group, priority: number) -> (),
+	onEntered: (group: Group, callback: Callback) -> () -> (),
+	onExited: (group: Group, callback: Callback) -> () -> (),
+	UID: number
+}
 
-local watching = {}
-local partData = {}
-local callbacks = {}
-
-local tree: Node = nil
+local frameBudget = 1/1000 --1ms by default
+local nextGroupId = 1
 local pendingRebuild = false
+local root: Node = nil
 
-local frameBudget = .0002
-do
-	local lastProcessedPart = nil
-	RunService.PostSimulation:Connect(function()
-		if pendingRebuild then
-			tree = createBVH()
-			pendingRebuild = false
-		end
+type PartData = {
+	activeGroupMemberships: {[GroupUID]: ZoneIndex},
+	memberOfGroups: {[GroupUID]: boolean}
+}
 
-		local runTime = 0
+local partInformation: {[BasePart]: PartData} = {}
+local partCustomData: {[BasePart]: {[GroupUID]: any}} = {}
 
-		while runTime < frameBudget do
-			local part, data = next(partData, lastProcessedPart)
+local groupPriorityMap: {[GroupUID]: number} = {}
+local groupEnteredCallbackMap: {[GroupUID]: {Callback}} = {}
+local groupExitedCallbackMap: {[GroupUID]: {Callback}} = {}
 
-			lastProcessedPart = part
-			if not lastProcessedPart then
-				break
-			end
+local zoneWatchingGroups: {[ZoneIndex]: {GroupUID}} = {}
+local zoneIndexToZoneObject: {[ZoneIndex]: Zone} = {}
 
-			local groups = data.groups
-			local customData = data.customData
+local function zoneWatchGroups(zone: Zone, ...: Group)
+	if not zoneWatchingGroups[zone.index] then
+		zoneWatchingGroups[zone.index] = {}
+	end
 
-			local insideOf = {}
-
-			local startTime = os.clock()
-			local firstOccurence = false
-			pointIntersection(tree, part.Position, function(nodeId)
-				if not firstOccurence then
-					runTime += (os.clock() - startTime)
-					firstOccurence = true
-				end
-
-				local zoneWatching = watching[nodeId]
-
-				for _, group in zoneWatching do
-					local currentState = groups[group]
-					local overwrite = customData[group]
-
-					if currentState ~= nil then
-						insideOf[group] = true
-
-						if not currentState then
-							groups[group] = true
-
-							local groupCallbacks = callbacks[group]
-							if groupCallbacks then
-								for _, callback in groupCallbacks.entered do
-									task.spawn(callback, part, objects[nodeId], overwrite)
-								end
-							end
-						end
-					end
-				end
-			end)
-
-			for group, state in groups do
-				if not insideOf[group] and state then
-					groups[group] = false
-
-					local groupCallbacks = callbacks[group]
-					local overwrite = customData[group]
-					if groupCallbacks then
-						for _, callback in groupCallbacks.exited do
-							task.spawn(callback, part, overwrite)
-						end
-					end
-				end
-			end
-		end
-	end)
-end
-
-local function insert(object)
-	if #holes > 0 then
-		local hole = table.remove(holes, 1)
-		objects[hole] = object
-		return hole
-	else
-		table.insert(objects, object)
-		return #objects
+	for _, group in {...} do
+		table.insert(zoneWatchingGroups[zone.index], group.UID)
 	end
 end
 
---[=[
-    @method remove
-    @within Zone
-
-    Removes the Zone from the BVH, requires a rebuild for the effect to show.
-]=]
-local function removeZone(zone: Zone): ()
-	local index = zone._index
-	watching[index] = nil
-
-	if index < #objects then
-		table.insert(holes, index)
-		objects[index] = nil
-	else
-		table.remove(objects)
+local function zoneUnwatchGroups(zone: Zone, ...: Group)
+	if not zoneWatchingGroups[zone.index] then
+		return
 	end
 
-	table.clear(zone)
+	for _, group in {...} do
+		local index = table.find(zoneWatchingGroups[zone.index], group.UID)
+		if index then
+			table.remove(zoneWatchingGroups[zone.index], index)
+		end
+	end
+
+	if #zoneWatchingGroups[zone.index] == 0 then
+		zoneWatchingGroups[zone.index] = nil
+	end
+end
+
+local function zoneDestroy(zone: Zone): ()
+	zoneWatchingGroups[zone.index] = nil
+	zoneIndexToZoneObject[zone.index] = nil
+	table.remove(objects, zone.index)
 	pendingRebuild = true
 end
 
---[=[
-    @method watchGroups
-    @within Zone
-    @param ... Groups
-    
-    ```lua
-    zone:watchGroups("Players", "NPCs", "Vehicles")
-    ```
-]=]
-local function watchGroup(zone: Zone, ...: Groups): ()
-	for _, group in {...} do
-		table.insert(watching[zone._index], group)
-	end
-end
-
---[=[
-    @method unwatchGroups
-    @within Zone
-    @param ... Groups
-    
-    ```lua
-    zone:unwatchGroups("Vehicles")
-    ```
-]=]
-local function unwatchGroup(zone: Zone, ...: Groups): ()
-	local currentlyWatching = watching[zone._index]
-	for _, group in {...} do
-		local index = table.find(currentlyWatching, group)
-		if index then
-			table.remove(currentlyWatching, index)
-		end
-	end
-end
-
---[=[
-    @function add
-    @within QuickBounds
-    @param cframe CFrame
-    @param size Vector3
-    @param shape "Box" | "Cylinder" | "Sphere"
-    @return Zone
-
-    Requires a rebuild for the zone to start working as intended.
-]=]
-function QuickBounds.add(cframe: CFrame, size: Vector3, shape: "Box" | "Cylinder" | "Sphere", associatedPart: BasePart?): Zone
+local function createZone(cframe: CFrame, size: Vector3, shape: Shapes, associatedPart: BasePart?): Zone
 	local halfSize = size / 2
 	local object: BoundingVolume = {
 		Position = cframe.Position,
@@ -437,12 +325,11 @@ function QuickBounds.add(cframe: CFrame, size: Vector3, shape: "Box" | "Cylinder
 		Shape = shape
 	}
 
-	if shape == "Sphere" then
-		assert(size.X == size.Y and size.Y == size.Z and size.X == size.Z, "sphere does not have a consistent radius")
+	if shape == "Ball" then
+		assert(size.X == size.Y and size.Y == size.Z and size.X == size.Z, "ball does not have a consistent radius")
 		object.radius = halfSize.X
 	elseif shape == "Cylinder" then
 		assert(size.Y == size.Z, "cylinder does not have a consistent radius")
-		--i hate cylinders why is the height X and why is the "real" upvector just RightVector
 		local halfHeight = object.HalfSize.X
 		local radius = object.HalfSize.Y
 
@@ -454,40 +341,33 @@ function QuickBounds.add(cframe: CFrame, size: Vector3, shape: "Box" | "Cylinder
 		object.axisLength = halfHeight * 2
 		object.radiusSquared = radius * radius
 	end
-	
-	if associatedPart then
-		object.Part = associatedPart
-	end
 
-	local index = insert(object)
-	watching[index] = {}
+	local index = #objects + 1
+	table.insert(objects, index, object)
 	pendingRebuild = true
 
-	return {
-		_index = index,
-		remove = removeZone,
-		watchGroups = watchGroup,
-		unwatchGroups = unwatchGroup
+	local zone = {
+		watchGroups = zoneWatchGroups,
+		unwatchGroups = zoneUnwatchGroups,
+		destroy = zoneDestroy,
+		part = associatedPart,
+		index = index
 	}
+
+	zoneIndexToZoneObject[index] = zone
+
+	return zone
 end
 
---[=[
-    @function addFromInstance
-    @within QuickBounds
-    @param part BasePart
-    @return Zone
-
-    Requires a rebuild for the zone to start working as intended.
-]=]
-function QuickBounds.addFromInstance(part: BasePart): Zone
-	local objectShape = "Box"
+local function createZoneFromInstance(part: BasePart): Zone
+	local objectShape: Shapes = "Block"
 
 	if part:IsA("Part") then
 		local shape = part.Shape
 		if shape == Enum.PartType.Block then
-			--do nothing i just dont wanna error cuh!
+			--do nothing
 		elseif shape == Enum.PartType.Ball then
-			objectShape = "Sphere"
+			objectShape = "Ball"
 		elseif shape == Enum.PartType.Cylinder then
 			objectShape = "Cylinder"
 		elseif shape == Enum.PartType.Wedge then
@@ -497,243 +377,265 @@ function QuickBounds.addFromInstance(part: BasePart): Zone
 		end
 	end
 
-	return QuickBounds.add(part.CFrame, part.Size, objectShape, part)
+	return createZone(part.CFrame, part.Size, objectShape, part)
+
 end
 
---[=[
-    @function assignToGroup
-    @within QuickBounds
-    @param group string
-    @param part BasePart 
-    @param callbackData any? --optional data to pass to callbacks
+local function setFrameBudget(budget: number): ()
+	frameBudget = budget
+end
 
-    Associates a BasePart with a group, if callbackData is specified, then it is specific to that group.
-]=]
-function QuickBounds.assignToGroup(group: Groups, part: BasePart, callbackData: any?)
-	if partData[part] then
-		partData[part].groups[group] = false
-		partData[part].customData[group] = callbackData
-	else
-		partData[part] = {
-			groups = {[group] = false},
-			connection = part.AncestryChanged:Connect(function(_, newParent)
-				if newParent == nil then
-					partData[part].connection:Disconnect()
-					partData[part] = nil
-				end
-			end),
-			customData = {[group] = callbackData}
+local function groupAdd(group: Group, part: BasePart, customData: any?): ()
+	if not partInformation[part] then
+		partInformation[part] = {
+			activeGroupMemberships = {},
+			memberOfGroups = {}
 		}
 	end
+
+	if not partCustomData[part] then
+		partCustomData[part] = {}
+	end
+
+	if customData ~= nil then
+		partCustomData[part][group.UID] = customData
+	end
+
+	partInformation[part].memberOfGroups[group.UID] = true
 end
 
---[=[
-    @function removeFromGroup
-    @within QuickBounds
-    @param group string
-    @param part BasePart
-
-    Removes a BasePart from a group, if the BasePart is not a member of any group after this operation, it gets cleaned up.
-]=]
-function QuickBounds.removeFromGroup(group: Groups, part: BasePart)
-	if not partData[part] then
+local function groupRemove(group: Group, part: BasePart): ()
+	local partData = partInformation[part]
+	if not partData then
 		return
 	end
 
-	partData[part].groups[group] = nil
-	if not next(partData[part].groups) then
-		partData[part].connection:Disconnect()
-		partData[part] = nil
-	end
-end
+	local previousZoneIndex = partData.activeGroupMemberships[group.UID]
 
---[=[
-    @function onEntered
-    @within QuickBounds
-    @param group Groups
-    @param callback function
-    @return () -> () --a function that if called will disconnect the callback
-    
-    ```lua
-    --parts internally registered to the "Players" group pass the Player object as the second argument in the callback
-    QuickBounds.onEntered("Players", function(_, zone, player)
-        print(player.Name .. " entered a zone!")
-    end)
-    ```
-]=]
-function QuickBounds.onEntered(group: Groups, callback: (Part, BoundingVolume, any?) -> ()): () -> ()
-	if not callbacks[group] then
-		callbacks[group] = {entered = {}, exited = {}}
-	end
+	partData.activeGroupMemberships[group.UID] = nil
+	partData.memberOfGroups[group.UID] = nil
 
-	table.insert(callbacks[group].entered, callback)
-	local index = #callbacks[group].entered
+	local previousCustomData
+	if partCustomData[part] then
+		previousCustomData = partCustomData[part][group.UID]
+		partCustomData[part][group.UID] = nil
 
-	return function()
-		callbacks[group].entered[index] = nil
-		if #callbacks[group].entered + #callbacks[group].exited == 0 then
-			callbacks[group] = nil
+		if next(partCustomData[part]) == nil then
+			partCustomData[part] = nil
 		end
-		index = nil
-	end
-end
-
---[=[
-    @function onExited
-    @within QuickBounds
-    @param group Groups
-    @param callback function
-    @return () -> () --a function that if called will disconnect the callback
-    
-    ```lua
-    --parts internally registered to the "Players" group pass the Player object as the second argument in the callback
-    QuickBounds.onExited("Players", function(_, player)
-        print(player.Name .. " exited a zone!")
-    end)
-    ```
-]=]
-function QuickBounds.onExited(group: Groups, callback: (Part, any?) -> ()): () -> ()
-	if not callbacks[group] then
-		callbacks[group] = {entered = {}, exited = {}}
 	end
 
-	table.insert(callbacks[group].exited, callback)
-	local index = #callbacks[group].exited
-
-	return function()
-		callbacks[group].exited[index] = nil
-		if #callbacks[group].entered + #callbacks[group].exited == 0 then
-			callbacks[group] = nil
-		end
-		index = nil
+	if next(partData.memberOfGroups) == nil then
+		partInformation[part] = nil
 	end
-end
 
---[=[
-    @function setFrameBudgetMs
-    @within QuickBounds
-    @param budget number
-    
-    Set the target frame budget in milliseconds.
-]=]
-function QuickBounds.setFrameBudgetMs(budget: number)
-	frameBudget = budget / 1000
-end
-
---[=[
-    @function getGroupsForPart
-    @within QuickBounds
-    @param part BasePart
-    @return {Groups}
-    
-    Get all groups that the part is inside of.
-]=]
-function QuickBounds.getGroupsForPart(part: BasePart): {Groups}
-	local data = partData[part]
-
-	local groups = {}
-	if data then
-		for group, state in data.groups do
-			if state then
-				table.insert(groups, group)
+	if previousZoneIndex then
+		local callbacks = groupExitedCallbackMap[group.UID]
+		if callbacks then
+			local zone = zoneIndexToZoneObject[previousZoneIndex]
+			for _, callback in callbacks do
+				task.spawn(callback, part, zone, previousCustomData)
 			end
 		end
 	end
-
-	return groups
 end
 
---[=[
-    @function isPartInGroup
-    @within QuickBounds
-    @param part BasePart
-    @param group Groups
-    @return boolean
-    
-    Checks whether a part is inside of a certain group.
-]=]
-function QuickBounds.isPartInGroup(part: BasePart, group: Groups): boolean
-	local data = partData[part]
+local function groupSetPriority(group: Group, priority: number): ()
+	groupPriorityMap[group.UID] = priority
+end
 
-	if not data then
-		return false
+local function groupOnEntered(group: Group, callback: Callback): () -> ()
+	table.insert(groupEnteredCallbackMap[group.UID], callback)
+	local index = #groupEnteredCallbackMap[group.UID]
+
+	return function()
+		table.remove(groupEnteredCallbackMap[group.UID], index)
 	end
-
-	return data.groups[group] == true
 end
 
---[=[
-    @function getPartsForGroup
-    @within QuickBounds
-    @param group Groups
-    @return {BasePart}
-    
-    Get all parts that the group contains.
-]=]
-function QuickBounds.getPartsForGroup(group: Groups): {BasePart}
-	local parts = {}
+local function groupOnExited(group: Group, callback: Callback): () -> ()
+	table.insert(groupExitedCallbackMap[group.UID], callback)
+	local index = #groupExitedCallbackMap[group.UID]
 
-	for part, data in partData do
-		if data.groups[group] then
-			table.insert(parts, part)
+	return function()
+		table.remove(groupExitedCallbackMap[group.UID], index)
+	end
+end
+
+local function createGroup(priority: number?): Group
+	local groupUID = nextGroupId
+	nextGroupId += 1
+
+	groupPriorityMap[groupUID] = priority or 1e6
+	groupEnteredCallbackMap[groupUID] = {}
+	groupExitedCallbackMap[groupUID] = {}
+
+	local group = {
+		add = groupAdd,
+		remove = groupRemove,
+		setPriority = groupSetPriority,
+		onEntered = groupOnEntered,
+		onExited = groupOnExited,
+		UID = groupUID
+	}
+
+	return group
+end
+
+do
+	RunService.Heartbeat:Connect(function(deltaTime)
+		if pendingRebuild then
+			debug.profilebegin("QuickBounds_build")
+
+			root = createBVH() :: Node
+			pendingRebuild = false
+
+			debug.profileend()
 		end
-	end
 
-	return parts
-end
-
---[=[
-    @function getAllZonesForGroup
-    @within QuickBounds
-    @param group Groups
-    @return {BoundingVolume}
-    
-    Get all zone objects that are part of a group.
-]=]
-function QuickBounds.getAllZonesForGroup(group: Groups): {BoundingVolume}
-	local gatheredObjects = {}
-	for index, groups in watching do
-		if table.find(groups, group) then
-			table.insert(gatheredObjects, objects[index])
+		if #objects == 0 then
+			return
 		end
-	end
-	return gatheredObjects
+
+		debug.profilebegin("QuickBounds_step")
+		
+		local runTime = 0
+		local lastProcessedPart
+		
+		while runTime <= frameBudget do
+			local part, partData = next(partInformation, lastProcessedPart)
+			
+			lastProcessedPart = part
+			if not lastProcessedPart then
+				break
+			end
+
+			local startTime = os.clock()
+
+			local previousState = table.clone(partData.activeGroupMemberships)
+
+			local currentPosition = (part :: BasePart).Position
+
+			local candidatePriorityByGroup = {}
+			local candidateIndexByGroup = {}
+
+			debug.profilebegin("gather_candidates")
+
+			pointIntersection(root, currentPosition, function(zoneIndex)
+				local watchingGroups = zoneWatchingGroups[zoneIndex]
+				if not watchingGroups then
+					return
+				end
+
+				for _, groupUID in watchingGroups do
+					if partData.memberOfGroups[groupUID] then
+						local priority = groupPriorityMap[groupUID]
+
+						local existingCandidatePriority = candidatePriorityByGroup[groupUID]
+						if not existingCandidatePriority or priority < existingCandidatePriority then
+							candidateIndexByGroup[groupUID] = zoneIndex
+							candidatePriorityByGroup[groupUID] = priority
+						end
+					end
+				end
+			end)
+
+			debug.profileend()
+
+			debug.profilebegin("resolve_candidates")
+
+			local candidateGroupByPriority = {}
+			local priorityLevels = {}
+
+			for groupUID, priority in candidatePriorityByGroup do
+				if not candidateGroupByPriority[priority] then
+					candidateGroupByPriority[priority] = {}
+				end
+				table.insert(candidateGroupByPriority[priority], groupUID)
+				table.insert(priorityLevels, priority)
+			end
+
+			table.sort(priorityLevels)
+
+			local newState = {}
+			local hasWinnersAtPriority = {}
+
+			for _, priority in priorityLevels do
+				local candidatesAtThisPriority = candidateGroupByPriority[priority]
+
+				for _, candidateGroupUID in candidatesAtThisPriority do
+					local newZoneIndex = candidateIndexByGroup[candidateGroupUID]
+					local previousZoneIndex = previousState[candidateGroupUID]
+
+					newState[candidateGroupUID] = if previousZoneIndex then previousZoneIndex else newZoneIndex
+					hasWinnersAtPriority[priority] = true
+				end
+			end
+
+			local lowestWinningPriority = nil
+			for _, priority in priorityLevels do
+				if hasWinnersAtPriority[priority] then
+					lowestWinningPriority = priority
+					break
+				end
+			end
+
+			if lowestWinningPriority then
+				local finalState = {}
+				for groupUID, zoneIndex in newState do
+					local groupPriority = groupPriorityMap[groupUID]
+					if groupPriority <= lowestWinningPriority then
+						finalState[groupUID] = zoneIndex
+					end
+				end
+				newState = finalState
+			end
+
+			debug.profileend()
+
+			partData.activeGroupMemberships = newState
+
+			debug.profilebegin("fire_callbacks")
+
+			for groupUID, newZoneIndex in newState do
+				if not previousState[groupUID] then
+					local callbacks = groupEnteredCallbackMap[groupUID]
+					if callbacks then
+						local zone = zoneIndexToZoneObject[newZoneIndex]
+						local data = partCustomData[part :: BasePart][groupUID]
+						for _, callback in callbacks do
+							task.spawn(callback, part :: BasePart, zone, data)
+						end
+					end
+				end
+			end
+
+			for groupUID, previousZoneIndex in previousState do
+				if not newState[groupUID] then
+					local callbacks = groupExitedCallbackMap[groupUID]
+					if callbacks then
+						local zone = zoneIndexToZoneObject[previousZoneIndex]
+						local data = partCustomData[part :: BasePart][groupUID]
+						for _, callback in callbacks do
+							task.spawn(callback, part :: BasePart, zone, data)
+						end
+					end
+				end
+			end
+
+			debug.profileend()
+
+			local endTime = os.clock()
+			runTime += (endTime - startTime)
+		end
+
+		debug.profileend()
+	end)
 end
 
---[=[
-    @function getCustomPartData
-    @within QuickBounds
-    @param part BasePart
-    @param group Groups
-    @return any?
-    
-    Get the custom part data associated with a group.
-]=]
-function QuickBounds.getCustomPartData(part: BasePart, group: Groups): any?
-	local data = partData[part]
-	if not data then
-		return nil
-	end
-
-	return data.customData[group]
-end
-
-local function onCharacterAdded(character)
-	local humanoidRootPart = character.HumanoidRootPart
-	local player = Players:GetPlayerFromCharacter(character)
-	QuickBounds.assignToGroup("Players", humanoidRootPart, player)
-end
-
-for _, player in Players:GetPlayers() do
-	if player.Character then
-		onCharacterAdded(player.Character)
-	end
-	
-	player.CharacterAdded:Connect(onCharacterAdded)
-end
-
-Players.PlayerAdded:Connect(function(player)
-	player.CharacterAdded:Connect(onCharacterAdded)
-end)
-
-return QuickBounds
+return {
+	createZone = createZone,
+	createZoneFromInstance = createZoneFromInstance,
+	setFrameBudget = setFrameBudget,
+	createGroup = createGroup
+}
