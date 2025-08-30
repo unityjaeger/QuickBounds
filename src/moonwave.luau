@@ -58,7 +58,9 @@
 --[=[
    @method setPriority
    @within Group
-   @param priority number 
+   @param priority number
+   Groups with the same priority can be entered by a part that is a member of both groups simultaneously.
+   If the groups have a different priority then the one with a lower priority will win.
 ]=]
 
 --[=[
