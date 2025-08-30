@@ -22,7 +22,7 @@ pesde add unityjaeger/quickbounds
 Or if you want the source, then just grab it from the latest release from the [Releases](https://github.com/unityjaeger/QuickBounds/releases) tab.
 
 ## Quick Start
-```luau
+```lua
 --create a group (optionally with a priority)
 local group = QuickBounds.createGroup(10) --lower priority groups get prioritized
 
