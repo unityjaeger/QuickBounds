@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkdocs=self.webpackChunkdocs||[]).push([[584],{4410:s=>{s.exports=JSON.parse('{"sourceUrl":"https://github.com/unityjaeger/QuickBounds/blob/main","baseUrl":"/QuickBounds/","classOrder":[],"apiCategories":[]}')}}]);
