@@ -275,6 +275,7 @@ local partInformation: {[BasePart]: PartData} = {}
 local partCustomData: {[BasePart]: {[GroupUID]: any}} = {}
 
 local groupPriorityMap: {[GroupUID]: number} = {}
+local groupUIDToGroupObject: {[GroupUID]: Group} = {}
 local groupEnteredCallbackMap: {[GroupUID]: {Callback}} = {}
 local groupExitedCallbackMap: {[GroupUID]: {Callback}} = {}
 
@@ -478,6 +479,8 @@ local function createGroup(priority: number?): Group
 		UID = groupUID
 	}
 
+	groupUIDToGroupObject[groupUID] = group
+
 	return group
 end
 
@@ -632,9 +635,44 @@ do
 	end)
 end
 
+local function isPartInGroup(part: BasePart, group: Group): boolean
+	return partInformation[part] and partInformation[part].memberOfGroups[group.UID]
+end
+
+local function getGroupsForPart(part: BasePart): {Group}
+	if not partInformation[part] then
+		return {}
+	end
+
+	local groups = {}
+
+	for groupUID in partInformation[part].memberOfGroups do
+		table.insert(groups, groupUIDToGroupObject[groupUID])
+	end
+
+	return groups
+end
+
+local function getPartsForGroup(group: Group): {BasePart}
+	local parts = {}
+	local groupUID = group.UID
+
+	for part, data in partInformation do
+		if data.memberOfGroups[groupUID] then
+			table.insert(parts, part)
+		end
+	end
+
+	return parts
+end
+
 return {
 	createZone = createZone,
 	createZoneFromInstance = createZoneFromInstance,
 	setFrameBudget = setFrameBudget,
-	createGroup = createGroup
+	createGroup = createGroup,
+
+	isPartInGroup = isPartInGroup,
+	getGroupsForPart = getGroupsForPart,
+	getPartsForGroup = getPartsForGroup
 }
