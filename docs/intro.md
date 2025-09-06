@@ -9,14 +9,11 @@ QuickBounds is a spatial detection module to track BaseParts moving in and out o
 It uses a Bounding Volume Hierarchy under the hood to minimize the costs of tracking these BaseParts.
 
 ## Installation
-If you use wally, then put this in your wally.toml
-```
-QuickBounds = "unityjaeger/quickbounds@0.3.0"
-```
 
-Alternatively, if you use pesde, then you can install it like this:
+For both pesde and wally, the package name + version is
+
 ```
-pesde add unityjaeger/quickbounds
+unityjaeger/quickbounds@0.3.0
 ```
 
 Or if you want the source, then just grab it from the latest release from the [Releases](https://github.com/unityjaeger/QuickBounds/releases) tab.
@@ -26,17 +23,23 @@ Or if you want the source, then just grab it from the latest release from the [R
 --create a group (optionally with a priority)
 local group = QuickBounds.createGroup(10) --lower priority groups get prioritized
 
+--add a basepart to the group to be tracked (optionally with custom data)
+group:add(workspace.ExamplePart, "custom data")
+
 --create a zone
-local zone = QuickBounds.createZoneFromInstance(workspace.MyZonePart)
---make the zone start watching specific groups
+local zone = QuickBounds.createZoneFromInstance(workspace.ExampleZonePart)
+
+--make the zone start watching the example group
 zone:watchGroups(group)
 
---
-group:onEntered(function(_, zone, player)
-    print(player.Name .. " entered the zone!")
+--register callbacks for zone entering/exiting
+group:onEntered(function(part, zone, customData)
+    --if the zone was registered with createZoneFromInstance then zone.part will be the Instance passed to that function,  otherwise it will be nil
+    print(part, "entered", zone.part, "with custom data", customData)
 end)
 
-group:onExited(function(_, zone, player)
-    print(player.Name .. " exited the zone!")
+group:onExited(function(part, zone, customData)
+    --if the zone was registered with createZoneFromInstance then zone.part will be the Instance passed to that function, otherwise it will be nil
+    print(part, "exited", zone.part, "with custom data", customData)
 end)
 ```
