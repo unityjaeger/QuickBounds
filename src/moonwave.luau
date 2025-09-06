@@ -37,6 +37,31 @@
 ]=]
 
 --[=[
+    @function isPartInGroup
+    @within QuickBounds
+    @param part BasePart
+    @param group Group
+    @return boolean
+    Checks if the BasePart is member of the group, not if it's currently physically inside of the group.
+]=]
+
+--[=[
+    @function getPartsForGroup
+    @within QuickBounds
+    @param group Group
+    @return {BasePart}
+    Returns all parts that are a member of the group.
+]=]
+
+--[=[
+    @function getGroupsForPart
+    @within QuickBounds
+    @param part BasePart
+    @return {Group}
+    Returns all groups that the BasePart is a member of.
+]=]
+
+--[=[
     @class Group
 ]=]
 
@@ -59,7 +84,7 @@
    @method setPriority
    @within Group
    @param priority number
-   Groups with the same priority can be entered by a part that is a member of both groups simultaneously.
+   Groups with the same priority can be entered by a BasePart that is a member of both groups simultaneously.
    If the groups have a different priority then the one with a lower priority will win.
 ]=]
 
@@ -68,7 +93,7 @@
    @within Group
    @param callback (part: BasePart, zone: Zone, customData: any?) -> ()
    @return () -> ()
-   Tracks whenever a BasePart that is part of this group enters this group through a Zone with the use of a callback function, returns a cleanup function. 
+   Tracks whenever a BasePart that is a member of this group enters this group through a Zone with the use of a callback function, returns a cleanup function. 
 ]=]
 
 --[=[
@@ -76,7 +101,7 @@
    @within Group
    @param callback (part: BasePart, zone: Zone, customData: any?) -> ()
    @return () -> ()
-   Tracks whenever a BasePart that is part of this group exits this group through a Zone with the use of a callback function, returns a cleanup function. 
+   Tracks whenever a BasePart that is a member of this group exits this group through a Zone with the use of a callback function, returns a cleanup function. 
 ]=]
 
 --[=[
@@ -92,7 +117,7 @@
 --[=[
     @prop part BaseClass?
     @within Zone
-    If available, the part associated with the zone object.
+    If available, the BasePart associated with the zone object.
 ]=]
 
 --[=[
