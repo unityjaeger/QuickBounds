@@ -24,12 +24,12 @@ game.Players.PlayerAdded:Connect(function(player)
 	PlayerAddon.addPlayerToGroups(player, exampleGroup)
 end)
 
-exampleGroup:onEntered(function(rootPart, zone, player: Player)
-	print(player, "entered zone", zone.part)
+exampleGroup:onEntered(function(rootPart, zone, player)
+	print(player.Name, "entered zone", zone.part)
 end)
 
-exampleGroup:onExited(function(rootPart, zone, player: Player)
-	print(player, "exited zone", zone.part)
+exampleGroup:onExited(function(rootPart, zone, player)
+	print(player.Name, "exited zone", zone.part)
 end)
 ```
 
