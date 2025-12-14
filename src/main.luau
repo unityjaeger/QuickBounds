@@ -34,6 +34,7 @@ type BoundingVolume = {
 }
 
 local objects: {BoundingVolume} = {}
+local nextZoneId = 1
 
 local function unionBounds(nodeA: Node, nodeB: Node): (Vector3, Vector3)
 	if not nodeA then return nodeB.min, nodeB.max end
@@ -312,7 +313,7 @@ end
 local function zoneDestroy(zone: Zone): ()
 	zoneWatchingGroups[zone.index] = nil
 	zoneIndexToZoneObject[zone.index] = nil
-	table.remove(objects, zone.index)
+	objects[zone.index] = nil
 	pendingRebuild = true
 end
 
@@ -342,8 +343,10 @@ local function createZone(cframe: CFrame, size: Vector3, shape: Shapes, associat
 		object.radiusSquared = radius * radius
 	end
 
-	local index = #objects + 1
-	table.insert(objects, index, object)
+	local index = nextZoneId
+	nextZoneId += 1
+
+	objects[index] = object
 	pendingRebuild = true
 
 	local zone = {
