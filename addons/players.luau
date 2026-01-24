@@ -49,6 +49,11 @@ end
 
 local function removeFromGroups(player: Player, root: BasePart): ()
 	local playerGroups = playerToGroups[player]
+	
+	if not playerGroups then
+		return
+	end
+	
 	for _, group in playerGroups do
 		group:remove(root)
 	end
@@ -61,17 +66,9 @@ local function addPlayerToGroups(player: Player, ...: QuickBounds.Group): ()
 
 	if not characterAddedConnections[player] then
 		characterAddedConnections[player] = player.CharacterAdded:Connect(function(character)
-			if not (character :: Character).HumanoidRootPart then
-				error("[CharacterAdded] " .. player.Name .. " has no HumanoidRootPart")
-			end
-
 			addToGroups(player, (character :: Character).HumanoidRootPart :: BasePart)
 		end)
 		characterRemovingConnections[player] = player.CharacterRemoving:Connect(function(character)
-			if not (character :: Character).HumanoidRootPart then
-				error("[CharacterRemoving] " .. player.Name .. " has no HumanoidRootPart")
-			end
-
 			removeFromGroups(player, (character :: Character).HumanoidRootPart :: BasePart)
 		end)
 	end
@@ -93,11 +90,11 @@ local function removePlayerFromGroups(player: Player, ...: QuickBounds.Group)
 		return
 	end
 
-	if not root then
-		error("could not remove groups from " .. player.Name .. " because player does not have a HumanoidRootPart")
-	end
-
 	local playerGroups = playerToGroups[player]
+	
+	if not playerGroups then
+		return
+	end
 
 	for _, group in {...} do
 		local index = findGroupIndexByUID(playerGroups, group.UID)
@@ -105,7 +102,7 @@ local function removePlayerFromGroups(player: Player, ...: QuickBounds.Group)
 			table.remove(playerGroups, index)
 		end
 
-		group:remove(root)
+		group:remove(root :: BasePart)
 	end
 
 	if #playerGroups == 0 then
