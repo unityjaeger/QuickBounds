@@ -94,35 +94,33 @@ local function positionToMortonCode(position: Vector3, sceneBoundsMin: Vector3, 
 end
 
 local function getSplitPos(list: {ListItem}, beginIndex: number, endIndex: number): number
-	if endIndex == beginIndex + 1 then
-		return beginIndex + 1
-	end
+	local first = list[beginIndex].mortonCode
+	local last  = list[endIndex].mortonCode
 
-	local firstCode = list[beginIndex].mortonCode
-	local lastCode = list[endIndex].mortonCode
-
-	if firstCode == lastCode then
+	if first == last then
 		return (beginIndex + endIndex) // 2
 	end
 
-	local commonPrefix = bit32.countrz(bit32.bxor(firstCode, lastCode))
+	local xor_val = bit32.bxor(first, last)
+	local highest_bit = 31 - bit32.countlz(xor_val)
 
-	local mid = beginIndex
-	local step = endIndex - beginIndex
+	local mask = bit32.lshift(1, highest_bit)
+	local first_mask = bit32.band(first, mask)
 
-	while step > 1 do
-		step = math.ceil(step / 2)
-		local newMid = mid + step
+	local left = beginIndex
+	local right = endIndex
 
-		if newMid < endIndex then
-			local splitPrefix = bit32.countrz(bit32.bxor(firstCode, list[newMid].mortonCode))
-			if splitPrefix > commonPrefix then
-				mid = newMid
-			end
+	while right - left > 1 do
+		local m = (left + right) // 2
+
+		if bit32.band(list[m].mortonCode, mask) == first_mask then
+			left = m
+		else
+			right = m
 		end
 	end
 
-	return mid + 1
+	return left + 1
 end
 
 local HUGE_VECTOR = Vector3.one * math.huge
@@ -180,7 +178,7 @@ local function createBVH(): Node?
 		table.insert(list, {id = id, mortonCode = mortonCode})
 	end
 
-	table.sort(list, function(a, b)
+	table.sort(list, function(a: ListItem, b)
 		return a.mortonCode < b.mortonCode
 	end)
 
@@ -193,7 +191,7 @@ end
 
 local function pointIntersection(node: Node, point: Vector3, callback: (nodeId: number) -> ()): ()
 	if not node or vector.clamp(point, node.min, node.max) ~= point then
-		return nil
+		return
 	end
 
 	if node.id > 0 then
@@ -231,7 +229,7 @@ local function pointIntersection(node: Node, point: Vector3, callback: (nodeId: 
 			end
 		end
 
-		return nil
+		return
 	end
 
 	pointIntersection(node.left :: Node, point, callback)
@@ -265,7 +263,7 @@ export type Group = {
 local frameBudget = 1/1000 --1ms by default
 local nextGroupId = 1
 local pendingRebuild = false
-local root: Node = nil
+local root: Node? = nil
 
 type PartData = {
 	activeGroupMemberships: {[GroupUID]: ZoneIndex},
@@ -381,7 +379,6 @@ local function createZoneFromInstance(part: BasePart): Zone
 	end
 
 	return createZone(part.CFrame, part.Size, objectShape, part)
-
 end
 
 local function setFrameBudget(budget: number): ()
@@ -448,20 +445,26 @@ local function groupSetPriority(group: Group, priority: number): ()
 end
 
 local function groupOnEntered(group: Group, callback: Callback): () -> ()
-	table.insert(groupEnteredCallbackMap[group.UID], callback)
-	local index = #groupEnteredCallbackMap[group.UID]
+	local target_map = groupEnteredCallbackMap[group.UID]
+	table.insert(target_map, callback)
 
 	return function()
-		table.remove(groupEnteredCallbackMap[group.UID], index)
+		local index = table.find(target_map, callback)
+		if index then
+			table.remove(target_map, index)
+		end
 	end
 end
 
 local function groupOnExited(group: Group, callback: Callback): () -> ()
-	table.insert(groupExitedCallbackMap[group.UID], callback)
-	local index = #groupExitedCallbackMap[group.UID]
+	local target_map = groupExitedCallbackMap[group.UID]
+	table.insert(target_map, callback)
 
 	return function()
-		table.remove(groupExitedCallbackMap[group.UID], index)
+		local index = table.find(target_map, callback)
+		if index then
+			table.remove(groupExitedCallbackMap[group.UID], index)
+		end
 	end
 end
 
@@ -503,7 +506,7 @@ do
 		end
 
 		debug.profilebegin("QuickBounds_step")
-		
+
 		local runTime = 0
 		local lastProcessedPart
 		
@@ -526,7 +529,7 @@ do
 
 			debug.profilebegin("gather_candidates")
 
-			pointIntersection(root, currentPosition, function(zoneIndex)
+			pointIntersection(root :: Node, currentPosition, function(zoneIndex)
 				local watchingGroups = zoneWatchingGroups[zoneIndex]
 				if not watchingGroups then
 					return
@@ -549,7 +552,7 @@ do
 
 			debug.profilebegin("resolve_candidates")
 
-			local candidateGroupByPriority = {}
+			local candidateGroupByPriority: {{number}} = {}
 			local priorityLevels = {}
 
 			for groupUID, priority in candidatePriorityByGroup do
