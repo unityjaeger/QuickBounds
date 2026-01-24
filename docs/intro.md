@@ -13,7 +13,7 @@ It uses a Bounding Volume Hierarchy under the hood to minimize the costs of trac
 For both pesde and wally, the package name + version is
 
 ```
-unityjaeger/quickbounds@0.3.3
+unityjaeger/quickbounds@0.3.4
 ```
 
 Or if you want the source, then just grab it from the latest release from the [Releases](https://github.com/unityjaeger/QuickBounds/releases) tab.
