@@ -93,7 +93,15 @@ local function positionToMortonCode(position: Vector3, sceneBoundsMin: Vector3, 
 	)
 end
 
-local function getSplitPos(list: {ListItem}, beginIndex: number, endIndex: number): number
+local function getSplitPos(list: {ListItem}, beginIndex: number, endIndex: number): number?
+	if (endIndex - beginIndex + 1) < 2 then
+		return nil
+	end
+	
+	if endIndex == beginIndex + 1 then
+		return beginIndex + 1
+	end
+	
 	local first = list[beginIndex].mortonCode
 	local last  = list[endIndex].mortonCode
 
@@ -119,7 +127,7 @@ local function getSplitPos(list: {ListItem}, beginIndex: number, endIndex: numbe
 			right = m
 		end
 	end
-
+	
 	return left + 1
 end
 
@@ -149,6 +157,16 @@ local function createSubTree(list: {ListItem}, boundsMin: {Vector3}, boundsMax: 
 		}
 	else
 		local mid = getSplitPos(list, beginIndex, endIndex)
+		if mid == nil then
+			--treat as leaf
+			local id = list[beginIndex].id
+			return {
+				min = boundsMin[id],
+				max = boundsMax[id],
+				id = id
+			}
+		end
+		
 		local left = createSubTree(list, boundsMin, boundsMax, beginIndex, mid - 1)
 		local right = createSubTree(list, boundsMin, boundsMax, mid, endIndex)
 		local min, max = unionBounds(left, right)
