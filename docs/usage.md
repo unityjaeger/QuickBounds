@@ -5,17 +5,13 @@ sidebar_position: 2
 # Usage
 
 ## Zones
-
-### Understanding Zones
-
-Think of a zone as an invisible boundary that defines a spatial area of interest. A zone has mathematical boundaries that define where it begins and ends, as well as a shape. Zones can overlap, intersect and exist in the same space without conflicting with each other.
-
-A zone is just simple geometry, it knows it's own shape, size and cframe. You can create a zone in one of two ways: Either by manually passing the cframe, size and shape or by creating the zone based on an instance. Every Roblox BasePart shape but Half Wedge is supported.
-
-### Creation
-
+Zones are static areas in your map, either defined by a part
 ```lua
---example of manual zone creation
+QuickBounds.createZoneFromInstance(workspace.ZonePart)
+```
+
+or with a cframe, size and shape.
+```lua
 QuickBounds.createZone(
     CFrame.new(0, 5, 0),
     Vector3.new(10, 10, 10),
@@ -23,86 +19,72 @@ QuickBounds.createZone(
 )
 ```
 
+You can also destroy zones by simply calling destroy on them.
 ```lua
---example of zone creation from an instance
-QuickBounds.createZoneFromInstance(workspace.ZonePart)
+local zone = QuickBounds.createZone(
+    CFrame.new(0, 5, 0),
+    Vector3.new(10, 10, 10),
+    "Box"
+)
+
+zone:Destroy()
 ```
-
-What's important to remember is that zones are purely geometric and that they can be used by multiple groups simultaneously if wanted.
-
-If at any point you want to destroy a zone, you can simply call
-
-```lua
-zone:destroy()
-```
-
-### Watching Groups
-
-To start tracking groups you have to tell the zone to watch the groups.
-
-```lua
-local zone = QuickBounds.createZoneFromInstance(workspace.ZonePart)
-zone:watchGroups(ExampleGroup1, ExampleGroup2)
-```
-
-You can also tell a zone to stop watching groups.
-
-```lua
-zone:unwatchGroups(ExampleGroup1)
-```
-
-This will be elaborated on further in the next section
 
 ## Groups
+Groups are collections of zones, where a zone can be a member of any number of groups.
 
-### Understanding Groups
-
-You can think of a group as an observer that watches zones and reacts when objects enter or leave said zones. Each group should ideally embody a particular aspect of your game logic - for example a safezone, quest triggers, traps and so on.
-
-The relationship between zones and groups is many to many, meaning any number of zones can watch any number of groups. When a zone starts watching a group, the group will be notified if any of its associated BaseParts enter this zone.
-
-### Creation and Priority
-
-To get a group working, you first need to create a group like so:
-
+### Creation
 ```lua
-QuickBounds.createGroup(10)
+local group = QuickBounds.createGroup(10)
+--you can also assign a different priority later
+group:setPriority(5)
 ```
-
-When creating a group you can pass a number parameter that is the priority of the group, the lower the priority of a group the higher the actual priority, it sounds confusing but this is due to an optimization (not needing to pass a function to table.sort during priority resolution, for those who care). So groups with a lower priority value get prioritized over groups with a higher priority value, groups at the same priority can coexist without interferring with one another.
-
-The above snippet is equivalent to this:
-
-```lua
-local group = QuickBounds.createGroup()
-group:setPriority(10)
-```
-
-When no priority is passed during group creation, it defaults to 100'000.
+The number you pass into createGroup is that group's priority, lower priorities will win over higher priorities and the default priority when no number is passed is 100000.
 
 ![Priority](priorities.png)
 
 ### Adding and Removing Parts
-
-If you want a group to start tracking a specific BasePart then you can do the following:
-
 ```lua
-local group = QuickBounds.createGroup()
-group:add(workspace.ExamplePart, "Custom Data")
-task.wait(5)
+local group = QuickBounds.createGroup(10)
+group:add(workspace.ExamplePart, {belongsTo = players.xyz})
+```
+
+To start tracking parts, you need to call group:add like above for any part you want the group to track.
+The second argument is your custom data, it can be whatever you want and is also unique to whatever group you add the part to.
+You can also naturally add a part to any number of groups.
+
+For a practical example you can take a look at the [Player Addon](https://unityjaeger.github.io/QuickBounds/docs/addons)
+
+To remove a part from a group simply call
+```lua
+local group = QuickBounds.createGroup(10)
 group:remove(workspace.ExamplePart)
 ```
 
-This will register the BasePart with the group, if you want it to be a part of more groups then you have to register it with each group.
+### Zones and Groups
+```lua
+local group = QuickBounds.createGroup(10)
+local otherGroup = QuickBounds.createGroup(5)
 
-There is also an optional second parameter for add that attaches custom data to a BasePart.
+local zone = QuickBounds.createZoneFromInstance(workspace.ZonePart)
 
-In this example it will also remove the BasePart from the group after 5 seconds.
+zone:watchGroups(group, otherGroup)
+```
+To make zones part of a group, you call watchGroups like above on a zone.
 
-### Tracking Entry/Exit
+To remove zones from a group, you call unwatchGroups in the same way:
+```lua
+local group = QuickBounds.createGroup(10)
+local otherGroup = QuickBounds.createGroup(5)
 
-To track entry/exit to a group you can do the following:
+local zone = QuickBounds.createZoneFromInstance(workspace.ZonePart)
 
+zone:watchGroups(group, otherGroup)
+zone:unwatchGroups(otherGroup)
+```
+
+### Tracking Parts
+Instead of tracking parts per zone, parts are tracked per group, meaning if a part enters any zone that is a member of a group, the group will be notified.
 ```lua
 local group = QuickBounds.createGroup()
 
@@ -115,12 +97,46 @@ group:onExited(function(part: BasePart, zone: QuickBounds.Zone, customData: any?
 end)
 ```
 
-There is no limit to the callbacks that can be registered for a group.
+You can also register as many callbacks as you like.
 
-The first parameter for the callback is the BasePart that interacted with the group, while the second is the specific zone object that the BasePart has entered. If the zone was created via createZoneFromInstance then it will also have a "part" field that can be accessed. The third parameter is the custom data that may or may not have been specified while adding a BasePart to the group, if you want a practical example of custom data in use then check out the Player Addon under the Addons tab.
+The first parameter passed to the callback function is the part that entered the group, the second parameter is the zone object as returned by createZone or createZoneFromInstance, where a zone.part field will exist if the zone was created with createZoneFromInstance. The third parameter is the custom data that was registered when adding the part to this group.
 
-Both onEntered and onExited return a cleanup function to remove the callback.
+Both onEntered and onExited return a cleanup function that will deregister the callback.
+
+## Utility
+
+### Frame Budget
+The module lets you define a custom frame budget in seconds, everything that the library does per frame and everything your callbacks do will count towards the remaining frame budget, the default frame budget is 1ms.
+```lua
+QuickBounds.setFrameBudget(2/1000) --2ms
+```
+
+### Helper Functions
+isPartInGroup = isPartInGroup,
+	getGroupsForPart = getGroupsForPart,
+	getPartsForGroup = getPartsForGroup
+
+isPartInGroup - quickly check if a part is currently inside of a group
+```lua
+local group = QuickBounds.createGroup()
+print(QuickBounds.isPartInGroup(workspace.ExamplePart, group))
+```
+
+getGroupsForPart - get all groups that a part is currently inside of
+```lua
+for _, group in QuickBounds.getGroupsForPart(workspace.ExamplePart) do
+    print(group)
+end
+```
+
+getPartsForGroup - get all parts that are currently inside of the specified group
+```lua
+local group = QuickBounds.createGroup()
+for _, part in QuickBounds.getPartsForGroup(group) do
+    print(part)
+end
+```
 
 ## Considerations
-
-- only the positions of BaseParts are tracked and their size not included for calculations, this means only the center of the BasePart can trigger Entry/Exit, make sure to keep this in mind when working with small zones or big BaseParts
+- only the center of parts are tracked and their size is not included for calculations, this is important to keep in mind when you have small/flat zones or big parts
+- parts are not guaranteed to touch a zone if they skip over the zone between 2 processing frames

@@ -5,8 +5,8 @@ sidebar_position: 1
 # Intro
 
 ## Overview
-QuickBounds is a spatial detection module to track BaseParts moving in and out of predefined areas in the world.
-It uses a Bounding Volume Hierarchy under the hood to minimize the costs of tracking these BaseParts.
+QuickBounds is at its core a module that lets you track parts that enter user-defined static zones.
+It uses a Bounding Volume Hierarchy under the hood to make sure the module doesn't eat up much frame time even with a large number of zones or tracked parts.
 
 ## Installation
 
@@ -34,7 +34,7 @@ zone:watchGroups(group)
 
 --register callbacks for zone entering/exiting
 group:onEntered(function(part, zone, customData)
-    --if the zone was registered with createZoneFromInstance then zone.part will be the Instance passed to that function,  otherwise it will be nil
+    --if the zone was registered with createZoneFromInstance then zone.part will be the Instance passed to that function, otherwise it will be nil
     print(part, "entered", zone.part, "with custom data", customData)
 end)
 
