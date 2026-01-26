@@ -112,10 +112,6 @@ QuickBounds.setFrameBudget(2/1000) --2ms
 ```
 
 ### Helper Functions
-isPartInGroup = isPartInGroup,
-	getGroupsForPart = getGroupsForPart,
-	getPartsForGroup = getPartsForGroup
-
 isPartInGroup - quickly check if a part is currently inside of a group
 ```lua
 local group = QuickBounds.createGroup()
