@@ -4,6 +4,8 @@
 
 local RunService = game:GetService("RunService")
 
+export type Trackable = BasePart | Camera | Model | WorldModel
+
 type ListItem = {
 	id: number,
 	mortonCode: number,
@@ -261,7 +263,7 @@ type GroupUID = number
 type ZoneIndex = number
 
 export type Shapes = "Block" | "Ball" | "Cylinder" | "Wedge"
-export type Callback = (part: BasePart, zone: Zone, customData: any?) -> ()
+export type Callback = (trackable: Trackable, zone: Zone, customData: any?) -> ()
 
 export type Zone = {
 	watchGroups: (zone: Zone, ...Group) -> (),
@@ -272,8 +274,8 @@ export type Zone = {
 }
 
 export type Group = {
-	add: (group: Group, part: BasePart, customData: any?) -> (),
-	remove: (group: Group, part: BasePart) -> (),
+	track: (group: Group, trackable: Trackable, customData: any?) -> (),
+	untrack: (group: Group, trackable: Trackable) -> (),
 	setPriority: (group: Group, priority: number) -> (),
 	onEntered: (group: Group, callback: Callback) -> () -> (),
 	onExited: (group: Group, callback: Callback) -> () -> (),
@@ -285,7 +287,7 @@ local nextGroupId = 1
 local pendingRebuild = false
 local root: Node? = nil
 
-type PartData = {
+type TrackableData = {
 	activeGroupMemberships: { [GroupUID]: ZoneIndex },
 	memberOfGroups: { [GroupUID]: boolean },
 	lastPosition: Vector3?,
@@ -293,8 +295,8 @@ type PartData = {
 	dirty: boolean?,
 }
 
-local partInformation: { [BasePart]: PartData } = {}
-local partCustomData: { [BasePart]: { [GroupUID]: any } } = {}
+local trackables: { [Trackable]: TrackableData } = {}
+local trackableCustomData: { [Trackable]: { [GroupUID]: any } } = {}
 
 local groupPriorityMap: { [GroupUID]: number } = {}
 local groupUIDToGroupObject: { [GroupUID]: Group } = {}
@@ -338,7 +340,7 @@ local function zoneDestroy(zone: Zone): ()
 	pendingRebuild = true
 end
 
-local function createZone(cframe: CFrame, size: Vector3, shape: Shapes, associatedPart: BasePart?): Zone
+local function newZone(cframe: CFrame, size: Vector3, shape: Shapes, associatedPart: BasePart?): Zone
 	local halfSize = size / 2
 	local object: BoundingVolume = {
 		Position = cframe.Position,
@@ -383,10 +385,10 @@ local function createZone(cframe: CFrame, size: Vector3, shape: Shapes, associat
 	return zone
 end
 
-local function createZoneFromInstance(part: BasePart): Zone
+local function newZoneFromInstance(part: BasePart): Zone
 	local objectShape: Shapes = "Block"
 
-	if part:IsA("Part") then
+	if part:IsA("BasePart") then
 		local shape = part.Shape
 		if shape == Enum.PartType.Block then
 			--do nothing
@@ -401,57 +403,58 @@ local function createZoneFromInstance(part: BasePart): Zone
 		end
 	end
 
-	return createZone(part.CFrame, part.Size, objectShape, part)
+	return newZone(part.CFrame, part.Size, objectShape, part)
 end
 
 local function setFrameBudget(budget: number): ()
 	frameBudget = budget
 end
 
-local function groupAdd(group: Group, part: BasePart, customData: any?): ()
-	if not partInformation[part] then
-		partInformation[part] = {
+local function track(group: Group, trackable: Trackable, customData: any?): ()
+	if not trackables[trackable] then
+		trackables[trackable] = {
 			activeGroupMemberships = {},
 			memberOfGroups = {},
+			isPart = trackable:IsA("BasePart"),
+			lastPosition = Vector3.zero,
 		}
 	end
 
-	if not partCustomData[part] then
-		partCustomData[part] = {}
+	if not trackableCustomData[trackable] then
+		trackableCustomData[trackable] = {}
 	end
 
 	if customData ~= nil then
-		partCustomData[part][group.UID] = customData
+		trackableCustomData[trackable][group.UID] = customData
 	end
 
-	partInformation[part].memberOfGroups[group.UID] = true
-	partInformation[part].isPart = part:IsA("BasePart")
-	partInformation[part].dirty = true
+	trackables[trackable].memberOfGroups[group.UID] = true
+	trackables[trackable].dirty = true
 end
 
-local function groupRemove(group: Group, part: BasePart): ()
-	local partData = partInformation[part]
-	if not partData then
+local function untrack(group: Group, trackable: Trackable): ()
+	local trackableData = trackables[trackable]
+	if not trackableData then
 		return
 	end
 
-	local previousZoneIndex = partData.activeGroupMemberships[group.UID]
+	local previousZoneIndex = trackableData.activeGroupMemberships[group.UID]
 
-	partData.activeGroupMemberships[group.UID] = nil
-	partData.memberOfGroups[group.UID] = nil
+	trackableData.activeGroupMemberships[group.UID] = nil
+	trackableData.memberOfGroups[group.UID] = nil
 
 	local previousCustomData
-	if partCustomData[part] then
-		previousCustomData = partCustomData[part][group.UID]
-		partCustomData[part][group.UID] = nil
+	if trackableCustomData[trackable] then
+		previousCustomData = trackableCustomData[trackable][group.UID]
+		trackableCustomData[trackable][group.UID] = nil
 
-		if next(partCustomData[part]) == nil then
-			partCustomData[part] = nil
+		if next(trackableCustomData[trackable]) == nil then
+			trackableCustomData[trackable] = nil
 		end
 	end
 
-	if next(partData.memberOfGroups) == nil then
-		partInformation[part] = nil
+	if next(trackableData.memberOfGroups) == nil then
+		trackables[trackable] = nil
 	end
 
 	if previousZoneIndex then
@@ -459,7 +462,7 @@ local function groupRemove(group: Group, part: BasePart): ()
 		if callbacks then
 			local zone = zoneIndexToZoneObject[previousZoneIndex]
 			for _, callback in callbacks do
-				task.spawn(callback, part, zone, previousCustomData)
+				task.spawn(callback, trackable, zone, previousCustomData)
 			end
 		end
 	end
@@ -493,7 +496,7 @@ local function groupOnExited(group: Group, callback: Callback): () -> ()
 	end
 end
 
-local function createGroup(priority: number?): Group
+local function newGroup(priority: number?): Group
 	local groupUID = nextGroupId
 	nextGroupId += 1
 
@@ -502,8 +505,8 @@ local function createGroup(priority: number?): Group
 	groupExitedCallbackMap[groupUID] = {}
 
 	local group = {
-		add = groupAdd,
-		remove = groupRemove,
+		track = track,
+		untrack = untrack,
 		setPriority = groupSetPriority,
 		onEntered = groupOnEntered,
 		onExited = groupOnExited,
@@ -535,25 +538,29 @@ do
 		debug.profilebegin("QuickBounds_step")
 
 		local runTime = 0
-		local lastProcessedPart
+		local lastProcessedTrackable
 
 		while runTime <= frameBudget do
-			local part, partData = next(partInformation, lastProcessedPart)
+			local trackable, trackableData = next(trackables, lastProcessedTrackable)
 
-			lastProcessedPart = part
-			if not lastProcessedPart then
+			lastProcessedTrackable = trackable
+			if not lastProcessedTrackable then
 				break
 			end
 
 			local startTime = os.clock()
-			local currentPosition = partData.isPart and part.Position or part:GetPivot().Position
-			if not rebuildHappened and not partData.dirty and partData.lastPosition == currentPosition then
+
+			local currentPosition = trackableData.isPart and (trackable :: BasePart).Position
+				or (trackable :: Camera | Model | WorldModel):GetPivot().Position
+
+			if not rebuildHappened and not trackableData.dirty and trackableData.lastPosition == currentPosition then
 				continue
 			end
-			partData.lastPosition = currentPosition
-			partData.dirty = false
 
-			local previousState = table.clone(partData.activeGroupMemberships)
+			trackableData.lastPosition = currentPosition
+			trackableData.dirty = false
+
+			local previousState = table.clone(trackableData.activeGroupMemberships)
 
 			local candidatePriorityByGroup = {}
 			local candidateIndexByGroup = {}
@@ -567,7 +574,7 @@ do
 				end
 
 				for _, groupUID in watchingGroups do
-					if partData.memberOfGroups[groupUID] then
+					if trackableData.memberOfGroups[groupUID] then
 						local priority = groupPriorityMap[groupUID]
 
 						local existingCandidatePriority = candidatePriorityByGroup[groupUID]
@@ -632,7 +639,7 @@ do
 
 			debug.profileend()
 
-			partData.activeGroupMemberships = newState
+			trackableData.activeGroupMemberships = newState
 
 			debug.profilebegin("fire_callbacks")
 
@@ -641,9 +648,9 @@ do
 					local callbacks = groupEnteredCallbackMap[groupUID]
 					if callbacks then
 						local zone = zoneIndexToZoneObject[newZoneIndex]
-						local data = partCustomData[part :: BasePart][groupUID]
+						local data = trackableCustomData[trackable :: Trackable][groupUID]
 						for _, callback in callbacks do
-							task.spawn(callback, part :: BasePart, zone, data)
+							task.spawn(callback, trackable :: Trackable, zone, data)
 						end
 					end
 				end
@@ -654,9 +661,9 @@ do
 					local callbacks = groupExitedCallbackMap[groupUID]
 					if callbacks then
 						local zone = zoneIndexToZoneObject[previousZoneIndex]
-						local data = partCustomData[part :: BasePart][groupUID]
+						local data = trackableCustomData[trackable :: Trackable][groupUID]
 						for _, callback in callbacks do
-							task.spawn(callback, part :: BasePart, zone, data)
+							task.spawn(callback, trackable :: Trackable, zone, data)
 						end
 					end
 				end
@@ -672,44 +679,45 @@ do
 	end)
 end
 
-local function isPartInGroup(part: BasePart, group: Group): boolean
-	return partInformation[part] and partInformation[part].memberOfGroups[group.UID]
+local function isInside(trackable: Trackable, group: Group): boolean
+	return trackables[trackable] and trackables[trackable].memberOfGroups[group.UID]
 end
 
-local function getGroupsForPart(part: BasePart): { Group }
-	if not partInformation[part] then
+local function getGroups(trackable: Trackable): { Group }
+	if not trackables[trackable] then
 		return {}
 	end
 
 	local groups = {}
 
-	for groupUID in partInformation[part].memberOfGroups do
+	for groupUID in trackables[trackable].memberOfGroups do
 		table.insert(groups, groupUIDToGroupObject[groupUID])
 	end
 
 	return groups
 end
 
-local function getPartsForGroup(group: Group): { BasePart }
-	local parts = {}
+local function getTracked(group: Group): { Trackable }
+	local foundTrackables = {}
 	local groupUID = group.UID
 
-	for part, data in partInformation do
+	for trackable, data in trackables do
 		if data.memberOfGroups[groupUID] then
-			table.insert(parts, part)
+			table.insert(foundTrackables, trackable)
 		end
 	end
 
-	return parts
+	return foundTrackables
 end
 
 return {
-	createZone = createZone,
-	createZoneFromInstance = createZoneFromInstance,
-	setFrameBudget = setFrameBudget,
-	createGroup = createGroup,
+	newZone = newZone,
+	newZoneFromInstance = newZoneFromInstance,
+	newGroup = newGroup,
 
-	isPartInGroup = isPartInGroup,
-	getGroupsForPart = getGroupsForPart,
-	getPartsForGroup = getPartsForGroup,
+	setFrameBudget = setFrameBudget,
+
+	isInside = isInside,
+	getGroups = getGroups,
+	getTracked = getTracked,
 }
