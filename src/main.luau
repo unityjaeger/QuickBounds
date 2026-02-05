@@ -521,9 +521,7 @@ end
 do
 	local candidatePriorityByGroup = {}
 	local candidateIndexByGroup = {}
-	local candidateGroupByPriority: { { number } } = {}
-	local priorityLevels = {}
-	local hasWinnersAtPriority = {}
+	local currentMembershipsBuffer = {}
 
 	RunService.Heartbeat:Connect(function(deltaTime)
 		local rebuildHappened = false
@@ -567,13 +565,11 @@ do
 			trackableData.lastPosition = currentPosition
 			trackableData.dirty = false
 
-			local previousState = trackableData.activeGroupMemberships
-
 			table.clear(candidatePriorityByGroup)
 			table.clear(candidateIndexByGroup)
-			table.clear(candidateGroupByPriority)
-			table.clear(priorityLevels)
-			table.clear(hasWinnersAtPriority)
+			table.clear(currentMembershipsBuffer)
+
+			local lowestWinningPriority = math.huge
 
 			debug.profilebegin("gather_candidates")
 
@@ -591,6 +587,10 @@ do
 						if not existingCandidatePriority or priority < existingCandidatePriority then
 							candidateIndexByGroup[groupUID] = zoneIndex
 							candidatePriorityByGroup[groupUID] = priority
+
+							if priority < lowestWinningPriority then
+								lowestWinningPriority = priority
+							end
 						end
 					end
 				end
@@ -598,78 +598,42 @@ do
 
 			debug.profileend()
 
-			debug.profilebegin("resolve_candidates")
+			debug.profilebegin("resolve_and_fire")
+			local currentMemberships = trackableData.activeGroupMemberships
 
-			for groupUID, priority in candidatePriorityByGroup do
-				if not candidateGroupByPriority[priority] then
-					candidateGroupByPriority[priority] = {}
-				end
-				table.insert(candidateGroupByPriority[priority], groupUID)
-				table.insert(priorityLevels, priority)
+			for groupUID in currentMemberships do
+				table.insert(currentMembershipsBuffer, groupUID)
 			end
 
-			table.sort(priorityLevels)
-
-			local newState = {}
-
-			for _, priority in priorityLevels do
-				local candidatesAtThisPriority = candidateGroupByPriority[priority]
-
-				for _, candidateGroupUID in candidatesAtThisPriority do
-					local newZoneIndex = candidateIndexByGroup[candidateGroupUID]
-					local previousZoneIndex = previousState[candidateGroupUID]
-
-					newState[candidateGroupUID] = if previousZoneIndex then previousZoneIndex else newZoneIndex
-					hasWinnersAtPriority[priority] = true
-				end
-			end
-
-			local lowestWinningPriority = nil
-			for _, priority in priorityLevels do
-				if hasWinnersAtPriority[priority] then
-					lowestWinningPriority = priority
-					break
-				end
-			end
-
-			if lowestWinningPriority then
-				local finalState = {}
-				for groupUID, zoneIndex in newState do
-					local groupPriority = groupPriorityMap[groupUID]
-					if groupPriority <= lowestWinningPriority then
-						finalState[groupUID] = zoneIndex
-					end
-				end
-				newState = finalState
-			end
-
-			debug.profileend()
-
-			trackableData.activeGroupMemberships = newState
-
-			debug.profilebegin("fire_callbacks")
-
-			for groupUID, newZoneIndex in newState do
-				if not previousState[groupUID] then
-					local callbacks = groupEnteredCallbackMap[groupUID]
+			for _, groupUID in currentMembershipsBuffer do
+				local oldZoneIndex = currentMemberships[groupUID]
+				local newZoneIndex = candidateIndexByGroup[groupUID]
+				local priority = candidatePriorityByGroup[groupUID]
+				if not newZoneIndex or priority > lowestWinningPriority then
+					currentMemberships[groupUID] = nil
+					local callbacks = groupExitedCallbackMap[groupUID]
 					if callbacks then
-						local zone = zoneIndexToZoneObject[newZoneIndex]
+						local zone = zoneIndexToZoneObject[oldZoneIndex]
 						local data = trackableCustomData[trackable :: Trackable][groupUID]
-						for _, callback in callbacks do
-							task.spawn(callback, trackable :: Trackable, zone, data)
+						for _, cb in callbacks do
+							task.defer(cb, trackable :: Trackable, zone, data)
 						end
 					end
 				end
 			end
 
-			for groupUID, previousZoneIndex in previousState do
-				if not newState[groupUID] then
-					local callbacks = groupExitedCallbackMap[groupUID]
-					if callbacks then
-						local zone = zoneIndexToZoneObject[previousZoneIndex]
-						local data = trackableCustomData[trackable :: Trackable][groupUID]
-						for _, callback in callbacks do
-							task.spawn(callback, trackable :: Trackable, zone, data)
+			for groupUID, newZoneIndex in candidateIndexByGroup do
+				local priority = candidatePriorityByGroup[groupUID]
+				if priority <= lowestWinningPriority then
+					if not currentMemberships[groupUID] then
+						currentMemberships[groupUID] = newZoneIndex -- PERSISTENT CHANGE
+						local callbacks = groupEnteredCallbackMap[groupUID]
+						if callbacks then
+							local zone = zoneIndexToZoneObject[newZoneIndex]
+							local data = trackableCustomData[trackable :: Trackable][groupUID]
+							for _, cb in callbacks do
+								task.defer(cb, trackable :: Trackable, zone, data)
+							end
 						end
 					end
 				end
@@ -706,16 +670,6 @@ local function getGroups(trackable: Trackable): { Group }
 	return groups
 end
 
-local function getGroupsByPriority(trackable: Trackable): { Group }
-	local groups = getGroups(trackable)
-
-	table.sort(groups, function(a, b)
-		return groupPriorityMap[a.UID] < groupPriorityMap[b.UID]
-	end)
-
-	return groups
-end
-
 local function getTracked(group: Group): { Trackable }
 	local foundTrackables = {}
 	local groupUID = group.UID
@@ -738,6 +692,5 @@ return {
 
 	isInside = isInside,
 	getGroups = getGroups,
-	getGroupsByPriority = getGroupsByPriority,
 	getTracked = getTracked,
 }
