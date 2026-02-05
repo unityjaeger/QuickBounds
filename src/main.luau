@@ -519,6 +519,12 @@ local function newGroup(priority: number?): Group
 end
 
 do
+	local candidatePriorityByGroup = {}
+	local candidateIndexByGroup = {}
+	local candidateGroupByPriority: { { number } } = {}
+	local priorityLevels = {}
+	local hasWinnersAtPriority = {}
+
 	RunService.Heartbeat:Connect(function(deltaTime)
 		local rebuildHappened = false
 		if pendingRebuild then
@@ -537,18 +543,19 @@ do
 
 		debug.profilebegin("QuickBounds_step")
 
-		local runTime = 0
+		local iterations = 0
+		local startFrameTime = os.clock()
 		local lastProcessedTrackable
 
-		while runTime <= frameBudget do
+		while true do
+			iterations += 1
+
 			local trackable, trackableData = next(trackables, lastProcessedTrackable)
 
 			lastProcessedTrackable = trackable
 			if not lastProcessedTrackable then
 				break
 			end
-
-			local startTime = os.clock()
 
 			local currentPosition = trackableData.isPart and (trackable :: BasePart).Position
 				or (trackable :: Camera | Model | WorldModel):GetPivot().Position
@@ -560,10 +567,13 @@ do
 			trackableData.lastPosition = currentPosition
 			trackableData.dirty = false
 
-			local previousState = table.clone(trackableData.activeGroupMemberships)
+			local previousState = trackableData.activeGroupMemberships
 
-			local candidatePriorityByGroup = {}
-			local candidateIndexByGroup = {}
+			table.clear(candidatePriorityByGroup)
+			table.clear(candidateIndexByGroup)
+			table.clear(candidateGroupByPriority)
+			table.clear(priorityLevels)
+			table.clear(hasWinnersAtPriority)
 
 			debug.profilebegin("gather_candidates")
 
@@ -590,9 +600,6 @@ do
 
 			debug.profilebegin("resolve_candidates")
 
-			local candidateGroupByPriority: { { number } } = {}
-			local priorityLevels = {}
-
 			for groupUID, priority in candidatePriorityByGroup do
 				if not candidateGroupByPriority[priority] then
 					candidateGroupByPriority[priority] = {}
@@ -604,7 +611,6 @@ do
 			table.sort(priorityLevels)
 
 			local newState = {}
-			local hasWinnersAtPriority = {}
 
 			for _, priority in priorityLevels do
 				local candidatesAtThisPriority = candidateGroupByPriority[priority]
@@ -671,8 +677,11 @@ do
 
 			debug.profileend()
 
-			local endTime = os.clock()
-			runTime += (endTime - startTime)
+			if iterations % 32 == 0 then
+				if os.clock() - startFrameTime > frameBudget then
+					break
+				end
+			end
 		end
 
 		debug.profileend()
@@ -693,6 +702,16 @@ local function getGroups(trackable: Trackable): { Group }
 	for groupUID in trackables[trackable].memberOfGroups do
 		table.insert(groups, groupUIDToGroupObject[groupUID])
 	end
+
+	return groups
+end
+
+local function getGroupsByPriority(trackable: Trackable): { Group }
+	local groups = getGroups(trackable)
+
+	table.sort(groups, function(a, b)
+		return groupPriorityMap[a.UID] < groupPriorityMap[b.UID]
+	end)
 
 	return groups
 end
@@ -719,5 +738,6 @@ return {
 
 	isInside = isInside,
 	getGroups = getGroups,
+	getGroupsByPriority = getGroupsByPriority,
 	getTracked = getTracked,
 }
