@@ -211,51 +211,70 @@ local function createBVH(): Node?
 	end
 end
 
-local function pointIntersection(node: Node, point: Vector3, callback: (nodeId: number) -> ()): ()
-	if not node or vector.clamp(point, node.min, node.max) ~= point then
+local traversalStack = table.create(64)
+local function pointIntersection(rootNode: Node, point: Vector3, callback: (nodeId: number) -> ()): ()
+	if not rootNode then
 		return
 	end
 
-	if node.id > 0 then
-		local object = objects[node.id]
+	local stackPtr = 1
+	traversalStack[1] = rootNode
 
-		if object.Shape == "Block" then
-			local localPoint = vector.abs(object.CFrame:PointToObjectSpace(point))
-			if vector.min(localPoint, object.HalfSize) == localPoint then
-				callback(node.id)
-			end
-		elseif object.Shape == "Ball" then
-			if vector.magnitude(object.Position - point) <= object.radius then
-				callback(node.id)
-			end
-		elseif object.Shape == "Cylinder" then
-			--all these type casts cuz the fields are technically optional
-			local toPoint = point - object.start :: Vector3
-			local projection = vector.dot(toPoint, object.axis :: Vector3)
+	while stackPtr > 0 do
+		local node = traversalStack[stackPtr]
+		stackPtr -= 1
 
-			if projection >= 0 and projection <= object.axisLength :: number then
-				local closestPointOnAxis = object.start :: Vector3 + object.axis :: Vector3 * projection
-				local distance = point - closestPointOnAxis
-				if vector.dot(distance, distance) <= object.radiusSquared :: number then
-					callback(node.id)
+		local min, max = node.min, node.max
+		if
+			point.X >= min.X
+			and point.X <= max.X
+			and point.Y >= min.Y
+			and point.Y <= max.Y
+			and point.Z >= min.Z
+			and point.Z <= max.Z
+		then
+			if node.id > 0 then
+				local object = objects[node.id]
+
+				if object.Shape == "Block" then
+					local localPoint = vector.abs(object.CFrame:PointToObjectSpace(point))
+					if vector.min(localPoint, object.HalfSize) == localPoint then
+						callback(node.id)
+					end
+				elseif object.Shape == "Ball" then
+					if vector.magnitude(object.Position - point) <= object.radius then
+						callback(node.id)
+					end
+				elseif object.Shape == "Cylinder" then
+					--all these type casts cuz the fields are technically optional
+					local toPoint = point - object.start :: Vector3
+					local projection = vector.dot(toPoint, object.axis :: Vector3)
+
+					if projection >= 0 and projection <= object.axisLength :: number then
+						local closestPointOnAxis = object.start :: Vector3 + object.axis :: Vector3 * projection
+						local distance = point - closestPointOnAxis
+						if vector.dot(distance, distance) <= object.radiusSquared :: number then
+							callback(node.id)
+						end
+					end
+				elseif object.Shape == "Wedge" then
+					local localPoint = object.CFrame:PointToObjectSpace(point)
+					local absolutePoint = vector.abs(localPoint)
+					if vector.min(absolutePoint, object.HalfSize) == absolutePoint then
+						local size = object.HalfSize * 2
+						if localPoint.Y / size.Y - localPoint.Z / size.Z <= 0 then
+							callback(node.id)
+						end
+					end
 				end
-			end
-		elseif object.Shape == "Wedge" then
-			local localPoint = object.CFrame:PointToObjectSpace(point)
-			local absolutePoint = vector.abs(localPoint)
-			if vector.min(absolutePoint, object.HalfSize) == absolutePoint then
-				local size = object.HalfSize * 2
-				if localPoint.Y / size.Y - localPoint.Z / size.Z <= 0 then
-					callback(node.id)
-				end
+			else
+				stackPtr += 1
+				traversalStack[stackPtr] = node.left
+				stackPtr += 1
+				traversalStack[stackPtr] = node.right
 			end
 		end
-
-		return
 	end
-
-	pointIntersection(node.left :: Node, point, callback)
-	pointIntersection(node.right :: Node, point, callback)
 end
 
 --for my own sanity
@@ -521,7 +540,7 @@ end
 do
 	local candidatePriorityByGroup = {}
 	local candidateIndexByGroup = {}
-	local currentMembershipsBuffer = {}
+	local candidateList = {}
 
 	RunService.Heartbeat:Connect(function(deltaTime)
 		local rebuildHappened = false
@@ -541,17 +560,14 @@ do
 
 		debug.profilebegin("QuickBounds_step")
 
-		local iterations = 0
 		local startFrameTime = os.clock()
+		local count = 0
 		local lastProcessedTrackable
 
 		while true do
-			iterations += 1
-
 			local trackable, trackableData = next(trackables, lastProcessedTrackable)
-
 			lastProcessedTrackable = trackable
-			if not lastProcessedTrackable then
+			if not trackable then
 				break
 			end
 
@@ -567,8 +583,8 @@ do
 
 			table.clear(candidatePriorityByGroup)
 			table.clear(candidateIndexByGroup)
-			table.clear(currentMembershipsBuffer)
-
+			table.clear(candidateList)
+			local candidateCount = 0
 			local lowestWinningPriority = math.huge
 
 			debug.profilebegin("gather_candidates")
@@ -585,6 +601,11 @@ do
 
 						local existingCandidatePriority = candidatePriorityByGroup[groupUID]
 						if not existingCandidatePriority or priority < existingCandidatePriority then
+							if not existingCandidatePriority then
+								candidateCount += 1
+								candidateList[candidateCount] = groupUID
+							end
+
 							candidateIndexByGroup[groupUID] = zoneIndex
 							candidatePriorityByGroup[groupUID] = priority
 
@@ -599,41 +620,43 @@ do
 			debug.profileend()
 
 			debug.profilebegin("resolve_and_fire")
+
 			local currentMemberships = trackableData.activeGroupMemberships
 
-			for groupUID in currentMemberships do
-				table.insert(currentMembershipsBuffer, groupUID)
-			end
-
-			for _, groupUID in currentMembershipsBuffer do
-				local oldZoneIndex = currentMemberships[groupUID]
-				local newZoneIndex = candidateIndexByGroup[groupUID]
-				local priority = candidatePriorityByGroup[groupUID]
-				if not newZoneIndex or priority > lowestWinningPriority then
+			for groupUID, oldZoneIndex in currentMemberships do
+				local newPriority = candidatePriorityByGroup[groupUID]
+				if not newPriority or newPriority > lowestWinningPriority then
 					currentMemberships[groupUID] = nil
 					local callbacks = groupExitedCallbackMap[groupUID]
 					if callbacks then
-						local zone = zoneIndexToZoneObject[oldZoneIndex]
-						local data = trackableCustomData[trackable :: Trackable][groupUID]
-						for _, cb in callbacks do
-							task.defer(cb, trackable :: Trackable, zone, data)
-						end
+						task.spawn(function()
+							local zone = zoneIndexToZoneObject[oldZoneIndex]
+							local data = trackableCustomData[trackable][groupUID]
+							for _, cb in callbacks do
+								cb(trackable, zone, data)
+							end
+						end)
 					end
 				end
 			end
 
-			for groupUID, newZoneIndex in candidateIndexByGroup do
+			for i = 1, candidateCount do
+				local groupUID = candidateList[i]
 				local priority = candidatePriorityByGroup[groupUID]
+
 				if priority <= lowestWinningPriority then
 					if not currentMemberships[groupUID] then
-						currentMemberships[groupUID] = newZoneIndex -- PERSISTENT CHANGE
+						local newZoneIndex = candidateIndexByGroup[groupUID]
+						currentMemberships[groupUID] = newZoneIndex
 						local callbacks = groupEnteredCallbackMap[groupUID]
 						if callbacks then
-							local zone = zoneIndexToZoneObject[newZoneIndex]
-							local data = trackableCustomData[trackable :: Trackable][groupUID]
-							for _, cb in callbacks do
-								task.defer(cb, trackable :: Trackable, zone, data)
-							end
+							task.spawn(function()
+								local zone = zoneIndexToZoneObject[newZoneIndex]
+								local data = trackableCustomData[trackable][groupUID]
+								for _, cb in callbacks do
+									cb(trackable, zone, data)
+								end
+							end)
 						end
 					end
 				end
@@ -641,10 +664,9 @@ do
 
 			debug.profileend()
 
-			if iterations % 32 == 0 then
-				if os.clock() - startFrameTime > frameBudget then
-					break
-				end
+			count += 1
+			if count % 32 == 0 and os.clock() - startFrameTime > frameBudget then
+				break
 			end
 		end
 
