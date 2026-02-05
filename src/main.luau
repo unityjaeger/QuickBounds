@@ -6,7 +6,7 @@ local RunService = game:GetService("RunService")
 
 type ListItem = {
 	id: number,
-	mortonCode: number
+	mortonCode: number,
 }
 
 type Node = {
@@ -14,7 +14,7 @@ type Node = {
 	right: Node?,
 	min: Vector3,
 	max: Vector3,
-	id: number
+	id: number,
 }
 
 type BoundingVolume = {
@@ -30,15 +30,19 @@ type BoundingVolume = {
 	start: Vector3?,
 	axis: Vector3?,
 	axisLength: number?,
-	radiusSquared: number?
+	radiusSquared: number?,
 }
 
-local objects: {BoundingVolume} = {}
+local objects: { BoundingVolume } = {}
 local nextZoneId = 1
 
 local function unionBounds(nodeA: Node, nodeB: Node): (Vector3, Vector3)
-	if not nodeA then return nodeB.min, nodeB.max end
-	if not nodeB then return nodeA.min, nodeA.max end
+	if not nodeA then
+		return nodeB.min, nodeB.max
+	end
+	if not nodeB then
+		return nodeA.min, nodeA.max
+	end
 	return vector.min(nodeA.min, nodeB.min), vector.max(nodeA.max, nodeB.max)
 end
 
@@ -47,9 +51,9 @@ local function getObjectBounds(object: BoundingVolume): (Vector3, Vector3)
 	local cframe = object.CFrame
 	local center = object.Position
 
-	local halfExtent = vector.abs(cframe.RightVector) * halfSize.X +
-		vector.abs(cframe.UpVector) * halfSize.Y +
-		vector.abs(cframe.LookVector) * halfSize.Z
+	local halfExtent = vector.abs(cframe.RightVector) * halfSize.X
+		+ vector.abs(cframe.UpVector) * halfSize.Y
+		+ vector.abs(cframe.LookVector) * halfSize.Z
 
 	return center - halfExtent, center + halfExtent
 end
@@ -79,31 +83,23 @@ end
 
 local function positionToMortonCode(position: Vector3, sceneBoundsMin: Vector3, sceneBoundsMax: Vector3): number
 	local scaled = vector.floor(
-		vector.clamp(
-			(position - sceneBoundsMin) / (sceneBoundsMax - sceneBoundsMin),
-			vector.zero,
-			vector.one
-		) * 1023
+		vector.clamp((position - sceneBoundsMin) / (sceneBoundsMax - sceneBoundsMin), vector.zero, vector.one) * 1023
 	)
 
-	return bit32.bor(
-		expandBits(scaled.x),
-		bit32.lshift(expandBits(scaled.y), 1),
-		bit32.lshift(expandBits(scaled.z), 2)
-	)
+	return bit32.bor(expandBits(scaled.x), bit32.lshift(expandBits(scaled.y), 1), bit32.lshift(expandBits(scaled.z), 2))
 end
 
-local function getSplitPos(list: {ListItem}, beginIndex: number, endIndex: number): number?
+local function getSplitPos(list: { ListItem }, beginIndex: number, endIndex: number): number?
 	if (endIndex - beginIndex + 1) < 2 then
 		return nil
 	end
-	
+
 	if endIndex == beginIndex + 1 then
 		return beginIndex + 1
 	end
-	
+
 	local first = list[beginIndex].mortonCode
-	local last  = list[endIndex].mortonCode
+	local last = list[endIndex].mortonCode
 
 	if first == last then
 		return (beginIndex + endIndex) // 2
@@ -127,7 +123,7 @@ local function getSplitPos(list: {ListItem}, beginIndex: number, endIndex: numbe
 			right = m
 		end
 	end
-	
+
 	return left + 1
 end
 
@@ -143,17 +139,23 @@ local function calculateSceneBounds(): (Vector3, Vector3)
 		max = vector.max(max, boundsMax)
 	end
 
-	local padding = vector.max(vector.one, (max - min) * .01)
+	local padding = vector.max(vector.one, (max - min) * 0.01)
 	return min - padding, max + padding
 end
 
-local function createSubTree(list: {ListItem}, boundsMin: {Vector3}, boundsMax: {Vector3}, beginIndex: number, endIndex: number): Node
+local function createSubTree(
+	list: { ListItem },
+	boundsMin: { Vector3 },
+	boundsMax: { Vector3 },
+	beginIndex: number,
+	endIndex: number
+): Node
 	if beginIndex == endIndex then
 		local id = list[beginIndex].id
 		return {
 			min = boundsMin[id],
 			max = boundsMax[id],
-			id = id
+			id = id,
 		}
 	else
 		local mid = getSplitPos(list, beginIndex, endIndex)
@@ -163,10 +165,10 @@ local function createSubTree(list: {ListItem}, boundsMin: {Vector3}, boundsMax: 
 			return {
 				min = boundsMin[id],
 				max = boundsMax[id],
-				id = id
+				id = id,
 			}
 		end
-		
+
 		local left = createSubTree(list, boundsMin, boundsMax, beginIndex, mid - 1)
 		local right = createSubTree(list, boundsMin, boundsMax, mid, endIndex)
 		local min, max = unionBounds(left, right)
@@ -175,7 +177,7 @@ local function createSubTree(list: {ListItem}, boundsMin: {Vector3}, boundsMax: 
 			max = max,
 			id = -1,
 			left = left,
-			right = right
+			right = right,
 		}
 	end
 end
@@ -183,7 +185,7 @@ end
 local function createBVH(): Node?
 	local sceneBoundsMin, sceneBoundsMax = calculateSceneBounds()
 
-	local list: {ListItem} = {}
+	local list: { ListItem } = {}
 	local objectBoundsMin = {}
 	local objectBoundsMax = {}
 
@@ -193,7 +195,7 @@ local function createBVH(): Node?
 		objectBoundsMax[id] = boundsMax
 
 		local mortonCode = positionToMortonCode(object.Position, sceneBoundsMin, sceneBoundsMax)
-		table.insert(list, {id = id, mortonCode = mortonCode})
+		table.insert(list, { id = id, mortonCode = mortonCode })
 	end
 
 	table.sort(list, function(a: ListItem, b)
@@ -241,7 +243,7 @@ local function pointIntersection(node: Node, point: Vector3, callback: (nodeId: 
 			local absolutePoint = vector.abs(localPoint)
 			if vector.min(absolutePoint, object.HalfSize) == absolutePoint then
 				local size = object.HalfSize * 2
-				if localPoint.Y/size.Y - localPoint.Z/size.Z <= 0 then
+				if localPoint.Y / size.Y - localPoint.Z / size.Z <= 0 then
 					callback(node.id)
 				end
 			end
@@ -266,7 +268,7 @@ export type Zone = {
 	unwatchGroups: (zone: Zone, ...Group) -> (),
 	destroy: (zone: Zone) -> (),
 	index: number,
-	part: BasePart?
+	part: BasePart?,
 }
 
 export type Group = {
@@ -275,36 +277,39 @@ export type Group = {
 	setPriority: (group: Group, priority: number) -> (),
 	onEntered: (group: Group, callback: Callback) -> () -> (),
 	onExited: (group: Group, callback: Callback) -> () -> (),
-	UID: number
+	UID: number,
 }
 
-local frameBudget = 1/1000 --1ms by default
+local frameBudget = 1 / 1000 --1ms by default
 local nextGroupId = 1
 local pendingRebuild = false
 local root: Node? = nil
 
 type PartData = {
-	activeGroupMemberships: {[GroupUID]: ZoneIndex},
-	memberOfGroups: {[GroupUID]: boolean}
+	activeGroupMemberships: { [GroupUID]: ZoneIndex },
+	memberOfGroups: { [GroupUID]: boolean },
+	lastPosition: Vector3?,
+	isPart: boolean?,
+	dirty: boolean?,
 }
 
-local partInformation: {[BasePart]: PartData} = {}
-local partCustomData: {[BasePart]: {[GroupUID]: any}} = {}
+local partInformation: { [BasePart]: PartData } = {}
+local partCustomData: { [BasePart]: { [GroupUID]: any } } = {}
 
-local groupPriorityMap: {[GroupUID]: number} = {}
-local groupUIDToGroupObject: {[GroupUID]: Group} = {}
-local groupEnteredCallbackMap: {[GroupUID]: {Callback}} = {}
-local groupExitedCallbackMap: {[GroupUID]: {Callback}} = {}
+local groupPriorityMap: { [GroupUID]: number } = {}
+local groupUIDToGroupObject: { [GroupUID]: Group } = {}
+local groupEnteredCallbackMap: { [GroupUID]: { Callback } } = {}
+local groupExitedCallbackMap: { [GroupUID]: { Callback } } = {}
 
-local zoneWatchingGroups: {[ZoneIndex]: {GroupUID}} = {}
-local zoneIndexToZoneObject: {[ZoneIndex]: Zone} = {}
+local zoneWatchingGroups: { [ZoneIndex]: { GroupUID } } = {}
+local zoneIndexToZoneObject: { [ZoneIndex]: Zone } = {}
 
 local function zoneWatchGroups(zone: Zone, ...: Group)
 	if not zoneWatchingGroups[zone.index] then
 		zoneWatchingGroups[zone.index] = {}
 	end
 
-	for _, group in {...} do
+	for _, group in { ... } do
 		table.insert(zoneWatchingGroups[zone.index], group.UID)
 	end
 end
@@ -314,7 +319,7 @@ local function zoneUnwatchGroups(zone: Zone, ...: Group)
 		return
 	end
 
-	for _, group in {...} do
+	for _, group in { ... } do
 		local index = table.find(zoneWatchingGroups[zone.index], group.UID)
 		if index then
 			table.remove(zoneWatchingGroups[zone.index], index)
@@ -339,7 +344,7 @@ local function createZone(cframe: CFrame, size: Vector3, shape: Shapes, associat
 		Position = cframe.Position,
 		CFrame = cframe,
 		HalfSize = halfSize,
-		Shape = shape
+		Shape = shape,
 	}
 
 	if shape == "Ball" then
@@ -370,7 +375,7 @@ local function createZone(cframe: CFrame, size: Vector3, shape: Shapes, associat
 		unwatchGroups = zoneUnwatchGroups,
 		destroy = zoneDestroy,
 		part = associatedPart,
-		index = index
+		index = index,
 	}
 
 	zoneIndexToZoneObject[index] = zone
@@ -407,7 +412,7 @@ local function groupAdd(group: Group, part: BasePart, customData: any?): ()
 	if not partInformation[part] then
 		partInformation[part] = {
 			activeGroupMemberships = {},
-			memberOfGroups = {}
+			memberOfGroups = {},
 		}
 	end
 
@@ -420,6 +425,8 @@ local function groupAdd(group: Group, part: BasePart, customData: any?): ()
 	end
 
 	partInformation[part].memberOfGroups[group.UID] = true
+	partInformation[part].isPart = part:IsA("BasePart")
+	partInformation[part].dirty = true
 end
 
 local function groupRemove(group: Group, part: BasePart): ()
@@ -500,7 +507,7 @@ local function createGroup(priority: number?): Group
 		setPriority = groupSetPriority,
 		onEntered = groupOnEntered,
 		onExited = groupOnExited,
-		UID = groupUID
+		UID = groupUID,
 	}
 
 	groupUIDToGroupObject[groupUID] = group
@@ -510,11 +517,13 @@ end
 
 do
 	RunService.Heartbeat:Connect(function(deltaTime)
+		local rebuildHappened = false
 		if pendingRebuild then
 			debug.profilebegin("QuickBounds_build")
 
 			root = createBVH() :: Node
 			pendingRebuild = false
+			rebuildHappened = true
 
 			debug.profileend()
 		end
@@ -527,20 +536,24 @@ do
 
 		local runTime = 0
 		local lastProcessedPart
-		
+
 		while runTime <= frameBudget do
 			local part, partData = next(partInformation, lastProcessedPart)
-			
+
 			lastProcessedPart = part
 			if not lastProcessedPart then
 				break
 			end
 
 			local startTime = os.clock()
+			local currentPosition = partData.isPart and part.Position or part:GetPivot().Position
+			if not rebuildHappened and not partData.dirty and partData.lastPosition == currentPosition then
+				continue
+			end
+			partData.lastPosition = currentPosition
+			partData.dirty = false
 
 			local previousState = table.clone(partData.activeGroupMemberships)
-
-			local currentPosition = (part :: BasePart).Position
 
 			local candidatePriorityByGroup = {}
 			local candidateIndexByGroup = {}
@@ -570,7 +583,7 @@ do
 
 			debug.profilebegin("resolve_candidates")
 
-			local candidateGroupByPriority: {{number}} = {}
+			local candidateGroupByPriority: { { number } } = {}
 			local priorityLevels = {}
 
 			for groupUID, priority in candidatePriorityByGroup do
@@ -663,7 +676,7 @@ local function isPartInGroup(part: BasePart, group: Group): boolean
 	return partInformation[part] and partInformation[part].memberOfGroups[group.UID]
 end
 
-local function getGroupsForPart(part: BasePart): {Group}
+local function getGroupsForPart(part: BasePart): { Group }
 	if not partInformation[part] then
 		return {}
 	end
@@ -677,7 +690,7 @@ local function getGroupsForPart(part: BasePart): {Group}
 	return groups
 end
 
-local function getPartsForGroup(group: Group): {BasePart}
+local function getPartsForGroup(group: Group): { BasePart }
 	local parts = {}
 	local groupUID = group.UID
 
@@ -698,5 +711,5 @@ return {
 
 	isPartInGroup = isPartInGroup,
 	getGroupsForPart = getGroupsForPart,
-	getPartsForGroup = getPartsForGroup
+	getPartsForGroup = getPartsForGroup,
 }
