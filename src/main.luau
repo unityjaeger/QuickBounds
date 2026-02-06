@@ -4,7 +4,15 @@
 
 local RunService = game:GetService("RunService")
 
-export type Trackable = BasePart | Camera | Model | WorldModel
+export type TrackableTable = {
+	Position: Vector3?,
+	WorldPosition: Vector3?,
+	CFrame: CFrame?,
+	GetPivot: ((self: any) -> CFrame)?,
+	[any]: any,
+}
+
+export type Trackable = BasePart | Model | Camera | Attachment | Bone | TrackableTable
 
 type ListItem = {
 	id: number,
@@ -320,12 +328,18 @@ local pendingRebuild = false
 local isDirty = false
 local root: Node? = nil
 
+local USE_POSITION = 1
+local USE_PRIMARY_PART = 2
+local USE_WORLD_POSITION = 3
+local USE_CFRAME = 4
+local USE_PIVOT = 5
+
 type TrackableData = {
 	activeGroupMemberships: { [GroupUID]: ZoneIndex },
 	memberOfGroups: { [GroupUID]: boolean },
-	lastPosition: Vector3?,
-	isPart: boolean?,
-	isDirty: boolean?,
+	lastPosition: Vector3,
+	strategy: number, -- 1, 2, 3, 4 or 5
+	isDirty: boolean,
 }
 
 local trackables: { [Trackable]: TrackableData } = {}
@@ -495,13 +509,60 @@ local function isItemTracked(trackable: Trackable): boolean
 end
 
 local function trackItemInGroup(group: Group, trackable: Trackable, customData: any?): ()
-	if not trackables[trackable] then
-		trackables[trackable] = {
+	local trackableData = trackables[trackable]
+
+	if not trackableData then
+		local strategy: number?
+		local itemType = typeof(trackable)
+		if itemType == "Instance" then
+			if trackable:IsA("BasePart") then
+				strategy = USE_POSITION
+			elseif trackable:IsA("Attachment") or trackable:IsA("Bone") then
+				strategy = USE_WORLD_POSITION
+			elseif trackable:IsA("Camera") then
+				strategy = USE_CFRAME
+			elseif trackable:IsA("Model") then
+				if (trackable :: Model).PrimaryPart then
+					strategy = USE_PRIMARY_PART
+				else
+					strategy = USE_PIVOT
+				end
+			end
+		elseif itemType == "table" then
+			local t = trackable :: any
+			if t.Position then
+				strategy = USE_POSITION
+			elseif t.CFrame then
+				strategy = USE_CFRAME
+			elseif t.WorldPosition then
+				strategy = USE_WORLD_POSITION
+			elseif t.GetPivot then
+				strategy = USE_PIVOT
+			end
+		end
+
+		if not strategy then
+			error(
+				string.format(
+					"QuickBounds Error: Cannot track item of type '%s'. "
+						.. "Items must be a BasePart, Camera, Model, or a table with Position/CFrame/GetPivot.",
+					itemType
+				),
+				2
+			)
+			return
+		end
+
+		trackableData = {
 			activeGroupMemberships = {},
 			memberOfGroups = {},
 			isPart = trackable:IsA("BasePart"),
 			lastPosition = Vector3.zero,
+			strategy = strategy,
+			isDirty = true,
 		}
+
+		trackables[trackable] = trackableData
 	end
 
 	if not trackableCustomData[trackable] then
@@ -512,8 +573,8 @@ local function trackItemInGroup(group: Group, trackable: Trackable, customData: 
 		trackableCustomData[trackable][group.UID] = customData
 	end
 
-	trackables[trackable].memberOfGroups[group.UID] = true
-	trackables[trackable].isDirty = true
+	trackableData.memberOfGroups[group.UID] = true
+	trackableData.isDirty = true
 end
 
 local function untrackItemFromGroup(group: Group, trackable: Trackable): ()
@@ -822,8 +883,20 @@ do
 				break
 			end
 
-			local currentPosition = trackableData.isPart and (trackable :: BasePart).Position
-				or (trackable :: Camera | Model | WorldModel):GetPivot().Position
+			local strategy = trackableData.strategy
+			local currentPosition: Vector3
+
+			if strategy == USE_POSITION then
+				currentPosition = (trackable :: any).Position
+			elseif strategy == USE_WORLD_POSITION then
+				currentPosition = (trackable :: any).WorldPosition
+			elseif strategy == USE_PRIMARY_PART then
+				currentPosition = (trackable :: any).PrimaryPart.Position
+			elseif strategy == USE_CFRAME then
+				currentPosition = (trackable :: any).CFrame.Position
+			else
+				currentPosition = (trackable :: any):GetPivot().Position
+			end
 
 			if not forceRefresh and not trackableData.isDirty and trackableData.lastPosition == currentPosition then
 				continue
