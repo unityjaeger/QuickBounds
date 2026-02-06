@@ -1,1 +1,0 @@
-Check out how to use it in the [Documentation](https://unityjaeger.github.io/QuickBounds/)

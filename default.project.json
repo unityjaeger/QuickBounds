@@ -1,6 +1,6 @@
 {
 	"name": "quickbounds",
 	"tree": {
-		"$path": "src/main.luau"
+		"$path": "lib"
 	}
 }
