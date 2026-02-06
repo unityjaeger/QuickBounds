@@ -286,6 +286,7 @@ export type Zone = {
 	-- methods
 	bindToGroups: (zone: Zone, ...Group) -> (),
 	unbindToGroups: (zone: Zone, ...Group) -> (),
+	getGroups: (zone: Zone) -> { Group },
 	destroy: (zone: Zone) -> (),
 
 	-- props
@@ -299,9 +300,11 @@ export type Group = {
 	untrackItem: (self: Group, trackable: Trackable) -> (),
 	setPriority: (self: Group, priority: number) -> (),
 	isItemInside: (self: Group, trackable: Trackable) -> boolean,
+	isPointInside: (self: Group, position: Vector3) -> boolean,
 	isItemTracked: (self: Group, trackable: Trackable) -> boolean,
 	getTrackedItems: (self: Group) -> { Trackable },
 	getItemsInside: (self: Group) -> { Trackable },
+	getZones: (self: Group) -> { Zone },
 
 	-- events
 	onEntered: (self: Group, callback: Callback) -> () -> (),
@@ -314,6 +317,7 @@ export type Group = {
 local frameBudget = 1 / 1000 --1ms by default
 local nextGroupId = 1
 local pendingRebuild = false
+local isDirty = false
 local root: Node? = nil
 
 type TrackableData = {
@@ -337,30 +341,61 @@ local zoneWatchingGroups: { [ZoneIndex]: { GroupUID } } = {}
 local zoneIndexToZoneObject: { [ZoneIndex]: Zone } = {}
 
 local function bindZoneToGroups(zone: Zone, ...: Group)
-	if not zoneWatchingGroups[zone.index] then
-		zoneWatchingGroups[zone.index] = {}
+	local watching = zoneWatchingGroups[zone.index]
+
+	if not watching then
+		watching = {}
+		zoneWatchingGroups[zone.index] = watching
 	end
 
-	for _, group in { ... } do
-		table.insert(zoneWatchingGroups[zone.index], group.UID)
-	end
-end
-
-local function unbindZoneFromGroups(zone: Zone, ...: Group)
-	if not zoneWatchingGroups[zone.index] then
-		return
-	end
-
-	for _, group in { ... } do
-		local index = table.find(zoneWatchingGroups[zone.index], group.UID)
-		if index then
-			table.remove(zoneWatchingGroups[zone.index], index)
+	local groups = { ... }
+	for i = 1, #groups do
+		local gUID = groups[i].UID
+		if not table.find(watching, gUID) then
+			table.insert(watching, gUID)
 		end
 	end
 
-	if #zoneWatchingGroups[zone.index] == 0 then
+	isDirty = true
+end
+
+local function unbindZoneFromGroups(zone: Zone, ...: Group)
+	local watching = zoneWatchingGroups[zone.index]
+	if not watching then
+		return
+	end
+
+	local groups = { ... }
+	for i = 1, #groups do
+		local gUID = groups[i].UID
+		local foundIndex = table.find(watching, gUID)
+		while foundIndex do
+			table.remove(watching, foundIndex)
+			foundIndex = table.find(watching, gUID)
+		end
+	end
+
+	if #watching == 0 then
 		zoneWatchingGroups[zone.index] = nil
 	end
+
+	isDirty = true
+end
+
+local function getGroupsForZone(zone: Zone): { Group }
+	local gUIDs = zoneWatchingGroups[zone.index]
+	if not gUIDs then
+		return {}
+	end
+
+	local results = {}
+	for _, gUID in gUIDs do
+		local groupObj = groupUIDToGroupObject[gUID]
+		if groupObj then
+			table.insert(results, groupObj)
+		end
+	end
+	return results
 end
 
 local function destroyZone(zone: Zone): ()
@@ -379,6 +414,10 @@ end
 
 function Zone:unbindToGroups(...: Group)
 	unbindZoneFromGroups(self, ...)
+end
+
+function Zone:getGroups()
+	return getGroupsForZone(self)
 end
 
 function Zone:destroy()
@@ -449,6 +488,10 @@ end
 
 local function setFrameBudget(budget: number): ()
 	frameBudget = budget
+end
+
+local function isItemTracked(trackable: Trackable): boolean
+	return trackables[trackable] ~= nil
 end
 
 local function trackItemInGroup(group: Group, trackable: Trackable, customData: any?): ()
@@ -532,8 +575,6 @@ local function groupOnExited(group: Group, callback: Callback): () -> ()
 		end
 	end
 end
-
-local isDirty = false
 
 local function groupSetPriority(group: Group, priority: number): ()
 	groupPriorityMap[group.UID] = priority
@@ -637,6 +678,22 @@ local function getGroupsAtPoint(position: Vector3): { Group }
 	return results
 end
 
+local function getZonesForGroup(group: Group): { Zone }
+	local results = {}
+	local gUID = group.UID
+
+	for zIdx, watchingUIDs in zoneWatchingGroups do
+		if table.find(watchingUIDs, gUID) then
+			local zoneObj = zoneIndexToZoneObject[zIdx]
+			if zoneObj then
+				table.insert(results, zoneObj)
+			end
+		end
+	end
+
+	return results
+end
+
 local function destroyGroup(group: Group)
 	local gUID = group.UID
 
@@ -687,6 +744,10 @@ function Group:isItemInside(trackable: Trackable)
 	return isItemInsideGroup(trackable, self)
 end
 
+function Group:isPointInside(position: Vector3)
+	return isPointInsideGroup(position, self)
+end
+
 function Group:isItemTracked(trackable: Trackable)
 	return isItemTrackedByGroup(trackable, self)
 end
@@ -697,6 +758,10 @@ end
 
 function Group:getItemsInside()
 	return getItemsInsideGroup(self)
+end
+
+function Group:getZones()
+	return getZonesForGroup(self)
 end
 
 function Group:destroy()
@@ -870,29 +935,12 @@ return {
 	newZoneFromPart = newZoneFromPart,
 	newGroup = newGroup,
 
-	-- destructors
-	destroyZone = destroyZone,
-	destroyGroup = destroyGroup,
-
-	-- trackable
-	isItemInsideGroup = isItemInsideGroup,
-	isItemTrackedByGroup = isItemTrackedByGroup,
-	getGroupsAtItem = getGroupsAtItem,
+	-- queries
+	isItemTracked = isItemTracked,
 	getGroupsForItem = getGroupsForItem,
-	getItemsForGroup = getItemsForGroup,
-	getItemsInsideGroup = getItemsInsideGroup,
-
-	-- spatial
-	isPointInsideGroup = isPointInsideGroup,
+	getGroupsAtItem = getGroupsAtItem,
 	getGroupsAtPoint = getGroupsAtPoint,
-
-	-- actions
-	bindZoneToGroups = bindZoneToGroups,
-	unbindZoneFromGroups = unbindZoneFromGroups,
-	trackItemInGroup = trackItemInGroup,
-	untrackItemFromGroup = untrackItemFromGroup,
 
 	-- config
 	setFrameBudget = setFrameBudget,
-	setGroupPriority = groupSetPriority,
 }
