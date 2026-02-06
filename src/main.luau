@@ -25,10 +25,10 @@ type BoundingVolume = {
 	CFrame: CFrame,
 	HalfSize: Vector3,
 
-	--for the ball
+	-- sphere specific
 	radius: number?,
 
-	--these are all for optimized cylinder calculations...
+	-- cylinder specific
 	start: Vector3?,
 	axis: Vector3?,
 	axisLength: number?,
@@ -162,7 +162,7 @@ local function createSubTree(
 	else
 		local mid = getSplitPos(list, beginIndex, endIndex)
 		if mid == nil then
-			--treat as leaf
+			-- treat as leaf
 			local id = list[beginIndex].id
 			return {
 				min = boundsMin[id],
@@ -246,7 +246,6 @@ local function pointIntersection(rootNode: Node, point: Vector3, callback: (node
 						callback(node.id)
 					end
 				elseif object.Shape == "Cylinder" then
-					--all these type casts cuz the fields are technically optional
 					local toPoint = point - object.start :: Vector3
 					local projection = vector.dot(toPoint, object.axis :: Vector3)
 
@@ -277,7 +276,6 @@ local function pointIntersection(rootNode: Node, point: Vector3, callback: (node
 	end
 end
 
---for my own sanity
 type GroupUID = number
 type ZoneIndex = number
 
@@ -285,19 +283,31 @@ export type Shapes = "Block" | "Ball" | "Cylinder" | "Wedge"
 export type Callback = (trackable: Trackable, zone: Zone, customData: any?) -> ()
 
 export type Zone = {
-	watchGroups: (zone: Zone, ...Group) -> (),
-	unwatchGroups: (zone: Zone, ...Group) -> (),
+	-- methods
+	bindToGroups: (zone: Zone, ...Group) -> (),
+	unbindToGroups: (zone: Zone, ...Group) -> (),
 	destroy: (zone: Zone) -> (),
+
+	-- props
 	index: number,
 	part: BasePart?,
 }
 
 export type Group = {
-	track: (group: Group, trackable: Trackable, customData: any?) -> (),
-	untrack: (group: Group, trackable: Trackable) -> (),
-	setPriority: (group: Group, priority: number) -> (),
-	onEntered: (group: Group, callback: Callback) -> () -> (),
-	onExited: (group: Group, callback: Callback) -> () -> (),
+	-- methods
+	trackItem: (self: Group, trackable: Trackable, customData: any?) -> (),
+	untrackItem: (self: Group, trackable: Trackable) -> (),
+	setPriority: (self: Group, priority: number) -> (),
+	isItemInside: (self: Group, trackable: Trackable) -> boolean,
+	isItemTracked: (self: Group, trackable: Trackable) -> boolean,
+	getTrackedItems: (self: Group) -> { Trackable },
+	getItemsInside: (self: Group) -> { Trackable },
+
+	-- events
+	onEntered: (self: Group, callback: Callback) -> () -> (),
+	onExited: (self: Group, callback: Callback) -> () -> (),
+
+	-- props
 	UID: number,
 }
 
@@ -311,12 +321,13 @@ type TrackableData = {
 	memberOfGroups: { [GroupUID]: boolean },
 	lastPosition: Vector3?,
 	isPart: boolean?,
-	dirty: boolean?,
+	isDirty: boolean?,
 }
 
 local trackables: { [Trackable]: TrackableData } = {}
 local trackableCustomData: { [Trackable]: { [GroupUID]: any } } = {}
 
+local groupActiveMembers = {}
 local groupPriorityMap: { [GroupUID]: number } = {}
 local groupUIDToGroupObject: { [GroupUID]: Group } = {}
 local groupEnteredCallbackMap: { [GroupUID]: { Callback } } = {}
@@ -325,7 +336,7 @@ local groupExitedCallbackMap: { [GroupUID]: { Callback } } = {}
 local zoneWatchingGroups: { [ZoneIndex]: { GroupUID } } = {}
 local zoneIndexToZoneObject: { [ZoneIndex]: Zone } = {}
 
-local function zoneWatchGroups(zone: Zone, ...: Group)
+local function bindZoneToGroups(zone: Zone, ...: Group)
 	if not zoneWatchingGroups[zone.index] then
 		zoneWatchingGroups[zone.index] = {}
 	end
@@ -335,7 +346,7 @@ local function zoneWatchGroups(zone: Zone, ...: Group)
 	end
 end
 
-local function zoneUnwatchGroups(zone: Zone, ...: Group)
+local function unbindZoneFromGroups(zone: Zone, ...: Group)
 	if not zoneWatchingGroups[zone.index] then
 		return
 	end
@@ -352,11 +363,26 @@ local function zoneUnwatchGroups(zone: Zone, ...: Group)
 	end
 end
 
-local function zoneDestroy(zone: Zone): ()
+local function destroyZone(zone: Zone): ()
 	zoneWatchingGroups[zone.index] = nil
 	zoneIndexToZoneObject[zone.index] = nil
 	objects[zone.index] = nil
 	pendingRebuild = true
+end
+
+local Zone = {}
+Zone.__index = Zone
+
+function Zone:bindToGroups(...: Group)
+	bindZoneToGroups(self, ...)
+end
+
+function Zone:unbindToGroups(...: Group)
+	unbindZoneFromGroups(self, ...)
+end
+
+function Zone:destroy()
+	destroyZone(self)
 end
 
 local function newZone(cframe: CFrame, size: Vector3, shape: Shapes, associatedPart: BasePart?): Zone
@@ -387,24 +413,20 @@ local function newZone(cframe: CFrame, size: Vector3, shape: Shapes, associatedP
 
 	local index = nextZoneId
 	nextZoneId += 1
-
 	objects[index] = object
 	pendingRebuild = true
 
-	local zone = {
-		watchGroups = zoneWatchGroups,
-		unwatchGroups = zoneUnwatchGroups,
-		destroy = zoneDestroy,
-		part = associatedPart,
+	local self = setmetatable({
 		index = index,
-	}
+		part = associatedPart,
+	}, Zone)
 
-	zoneIndexToZoneObject[index] = zone
+	zoneIndexToZoneObject[index] = (self :: any) :: Zone
 
-	return zone
+	return (self :: any) :: Zone
 end
 
-local function newZoneFromInstance(part: BasePart): Zone
+local function newZoneFromPart(part: BasePart): Zone
 	local objectShape: Shapes = "Block"
 
 	if part:IsA("BasePart") then
@@ -429,7 +451,7 @@ local function setFrameBudget(budget: number): ()
 	frameBudget = budget
 end
 
-local function track(group: Group, trackable: Trackable, customData: any?): ()
+local function trackItemInGroup(group: Group, trackable: Trackable, customData: any?): ()
 	if not trackables[trackable] then
 		trackables[trackable] = {
 			activeGroupMemberships = {},
@@ -448,10 +470,10 @@ local function track(group: Group, trackable: Trackable, customData: any?): ()
 	end
 
 	trackables[trackable].memberOfGroups[group.UID] = true
-	trackables[trackable].dirty = true
+	trackables[trackable].isDirty = true
 end
 
-local function untrack(group: Group, trackable: Trackable): ()
+local function untrackItemFromGroup(group: Group, trackable: Trackable): ()
 	local trackableData = trackables[trackable]
 	if not trackableData then
 		return
@@ -487,10 +509,6 @@ local function untrack(group: Group, trackable: Trackable): ()
 	end
 end
 
-local function groupSetPriority(group: Group, priority: number): ()
-	groupPriorityMap[group.UID] = priority
-end
-
 local function groupOnEntered(group: Group, callback: Callback): () -> ()
 	local target_map = groupEnteredCallbackMap[group.UID]
 	table.insert(target_map, callback)
@@ -515,26 +533,191 @@ local function groupOnExited(group: Group, callback: Callback): () -> ()
 	end
 end
 
+local isDirty = false
+
+local function groupSetPriority(group: Group, priority: number): ()
+	groupPriorityMap[group.UID] = priority
+	isDirty = true
+end
+
+local function isItemInsideGroup(trackable: Trackable, group: Group): boolean
+	local active = groupActiveMembers[group.UID]
+	return active ~= nil and active[trackable] == true
+end
+
+local function isItemTrackedByGroup(trackable: Trackable, group: Group): boolean
+	local data = trackables[trackable]
+	return data ~= nil and data.memberOfGroups[group.UID] == true
+end
+
+local function getGroupsForItem(trackable: Trackable): { Group }
+	local data = trackables[trackable]
+	if not data then
+		return {}
+	end
+	local results = {}
+	for gUID in data.memberOfGroups do
+		table.insert(results, groupUIDToGroupObject[gUID])
+	end
+	return results
+end
+
+local function getGroupsAtItem(trackable: Trackable): { Group }
+	local data = trackables[trackable]
+	if not data or not data.lastPosition then
+		return {}
+	end
+	local results = {}
+	local added = {}
+	pointIntersection(root :: Node, data.lastPosition, function(zIdx)
+		local watching = zoneWatchingGroups[zIdx]
+		if not watching then
+			return
+		end
+		for _, gUID in watching do
+			if not added[gUID] then
+				added[gUID] = true
+				table.insert(results, groupUIDToGroupObject[gUID])
+			end
+		end
+	end)
+	return results
+end
+
+local function getItemsForGroup(group: Group): { Trackable }
+	local results = {}
+	for trackable, data in trackables do
+		if data.memberOfGroups[group.UID] then
+			table.insert(results, trackable)
+		end
+	end
+	return results
+end
+
+local function getItemsInsideGroup(group: Group): { Trackable }
+	local active = groupActiveMembers[group.UID]
+	if not active then
+		return {}
+	end
+	local results = {}
+	for trackable in active do
+		table.insert(results, trackable)
+	end
+	return results
+end
+
+local function isPointInsideGroup(position: Vector3, group: Group): boolean
+	local found = false
+	pointIntersection(root :: Node, position, function(zIdx)
+		if found then
+			return
+		end
+		local watching = zoneWatchingGroups[zIdx]
+		if watching and table.find(watching, group.UID) then
+			found = true
+		end
+	end)
+	return found
+end
+
+local function getGroupsAtPoint(position: Vector3): { Group }
+	local results, added = {}, {}
+	pointIntersection(root :: Node, position, function(zIdx)
+		local watching = zoneWatchingGroups[zIdx]
+		if not watching then
+			return
+		end
+		for _, gUID in watching do
+			if not added[gUID] then
+				added[gUID] = true
+				table.insert(results, groupUIDToGroupObject[gUID])
+			end
+		end
+	end)
+	return results
+end
+
+local function destroyGroup(group: Group)
+	local gUID = group.UID
+
+	local active = groupActiveMembers[gUID]
+	if active then
+		local members = {}
+		for obj in active do
+			table.insert(members, obj)
+		end
+		for _, obj in members do
+			untrackItemFromGroup(group, obj)
+		end
+	end
+
+	groupActiveMembers[gUID] = nil
+	groupPriorityMap[gUID] = nil
+	groupUIDToGroupObject[gUID] = nil
+	groupEnteredCallbackMap[gUID] = nil
+	groupExitedCallbackMap[gUID] = nil
+
+	isDirty = true
+end
+
+local Group = {}
+Group.__index = Group
+
+function Group:trackItem(trackable: Trackable, customData: any?)
+	trackItemInGroup(self, trackable, customData)
+end
+
+function Group:untrackItem(trackable: Trackable)
+	untrackItemFromGroup(self, trackable)
+end
+
+function Group:setPriority(priority: number)
+	groupSetPriority(self, priority)
+end
+
+function Group:onEntered(callback: Callback)
+	return groupOnEntered(self, callback)
+end
+
+function Group:onExited(callback: Callback)
+	return groupOnExited(self, callback)
+end
+
+function Group:isItemInside(trackable: Trackable)
+	return isItemInsideGroup(trackable, self)
+end
+
+function Group:isItemTracked(trackable: Trackable)
+	return isItemTrackedByGroup(trackable, self)
+end
+
+function Group:getTrackedItems()
+	return getItemsForGroup(self)
+end
+
+function Group:getItemsInside()
+	return getItemsInsideGroup(self)
+end
+
+function Group:destroy()
+	destroyGroup(self)
+end
+
 local function newGroup(priority: number?): Group
 	local groupUID = nextGroupId
 	nextGroupId += 1
 
+	groupActiveMembers[groupUID] = {}
 	groupPriorityMap[groupUID] = priority or 1e6
 	groupEnteredCallbackMap[groupUID] = {}
 	groupExitedCallbackMap[groupUID] = {}
 
-	local group = {
-		track = track,
-		untrack = untrack,
-		setPriority = groupSetPriority,
-		onEntered = groupOnEntered,
-		onExited = groupOnExited,
+	local group = setmetatable({
 		UID = groupUID,
-	}
+	}, Group)
 
-	groupUIDToGroupObject[groupUID] = group
-
-	return group
+	groupUIDToGroupObject[groupUID] = (group :: any) :: Group
+	return (group :: any) :: Group
 end
 
 do
@@ -542,17 +725,20 @@ do
 	local candidateIndexByGroup = {}
 	local candidateList = {}
 
-	RunService.Heartbeat:Connect(function(deltaTime)
-		local rebuildHappened = false
+	RunService.Heartbeat:Connect(function()
+		local forceRefresh = isDirty
+
 		if pendingRebuild then
 			debug.profilebegin("QuickBounds_build")
 
 			root = createBVH() :: Node
 			pendingRebuild = false
-			rebuildHappened = true
+			forceRefresh = true
 
 			debug.profileend()
 		end
+
+		isDirty = false
 
 		if #objects == 0 then
 			return
@@ -574,12 +760,12 @@ do
 			local currentPosition = trackableData.isPart and (trackable :: BasePart).Position
 				or (trackable :: Camera | Model | WorldModel):GetPivot().Position
 
-			if not rebuildHappened and not trackableData.dirty and trackableData.lastPosition == currentPosition then
+			if not forceRefresh and not trackableData.isDirty and trackableData.lastPosition == currentPosition then
 				continue
 			end
 
 			trackableData.lastPosition = currentPosition
-			trackableData.dirty = false
+			trackableData.isDirty = false
 
 			table.clear(candidatePriorityByGroup)
 			table.clear(candidateIndexByGroup)
@@ -627,6 +813,8 @@ do
 				local newPriority = candidatePriorityByGroup[groupUID]
 				if not newPriority or newPriority > lowestWinningPriority then
 					currentMemberships[groupUID] = nil
+					groupActiveMembers[groupUID][trackable] = nil
+
 					local callbacks = groupExitedCallbackMap[groupUID]
 					if callbacks then
 						task.spawn(function()
@@ -648,6 +836,8 @@ do
 					if not currentMemberships[groupUID] then
 						local newZoneIndex = candidateIndexByGroup[groupUID]
 						currentMemberships[groupUID] = newZoneIndex
+						groupActiveMembers[groupUID][trackable] = true
+
 						local callbacks = groupEnteredCallbackMap[groupUID]
 						if callbacks then
 							task.spawn(function()
@@ -674,45 +864,35 @@ do
 	end)
 end
 
-local function isInside(trackable: Trackable, group: Group): boolean
-	return trackables[trackable] and trackables[trackable].memberOfGroups[group.UID]
-end
-
-local function getGroups(trackable: Trackable): { Group }
-	if not trackables[trackable] then
-		return {}
-	end
-
-	local groups = {}
-
-	for groupUID in trackables[trackable].memberOfGroups do
-		table.insert(groups, groupUIDToGroupObject[groupUID])
-	end
-
-	return groups
-end
-
-local function getTracked(group: Group): { Trackable }
-	local foundTrackables = {}
-	local groupUID = group.UID
-
-	for trackable, data in trackables do
-		if data.memberOfGroups[groupUID] then
-			table.insert(foundTrackables, trackable)
-		end
-	end
-
-	return foundTrackables
-end
-
 return {
+	-- constructors
 	newZone = newZone,
-	newZoneFromInstance = newZoneFromInstance,
+	newZoneFromPart = newZoneFromPart,
 	newGroup = newGroup,
 
-	setFrameBudget = setFrameBudget,
+	-- destructors
+	destroyZone = destroyZone,
+	destroyGroup = destroyGroup,
 
-	isInside = isInside,
-	getGroups = getGroups,
-	getTracked = getTracked,
+	-- trackable
+	isItemInsideGroup = isItemInsideGroup,
+	isItemTrackedByGroup = isItemTrackedByGroup,
+	getGroupsAtItem = getGroupsAtItem,
+	getGroupsForItem = getGroupsForItem,
+	getItemsForGroup = getItemsForGroup,
+	getItemsInsideGroup = getItemsInsideGroup,
+
+	-- spatial
+	isPointInsideGroup = isPointInsideGroup,
+	getGroupsAtPoint = getGroupsAtPoint,
+
+	-- actions
+	bindZoneToGroups = bindZoneToGroups,
+	unbindZoneFromGroups = unbindZoneFromGroups,
+	trackItemInGroup = trackItemInGroup,
+	untrackItemFromGroup = untrackItemFromGroup,
+
+	-- config
+	setFrameBudget = setFrameBudget,
+	setGroupPriority = groupSetPriority,
 }
