@@ -7,7 +7,6 @@ local RunService = game:GetService("RunService")
 local Geometry = require(script.Geometry)
 local SpatialIndex = require(script.SpatialIndex)
 
--- Types --
 type TrackableTable = {
 	Position: Vector3?,
 	WorldPosition: Vector3?,
@@ -18,9 +17,11 @@ type TrackableTable = {
 
 export type Trackable = BasePart | Model | Camera | Attachment | Bone | TrackableTable
 
+type UID = number
+
 type TrackableData = {
-	activeGroupMemberships: { [number]: number }, -- [GroupUID] = ZoneIndex
-	memberOfGroups: { [number]: boolean }, -- [GroupUID] = true
+	activeGroupMemberships: { [UID]: number },
+	memberOfGroups: { [UID]: boolean },
 	lastPosition: Vector3,
 	strategy: number,
 	isDirty: boolean,
@@ -42,32 +43,27 @@ export type Group = {
 	trackItem: (self: Group, trackable: Trackable, customData: any?) -> (),
 	untrackItem: (self: Group, trackable: Trackable) -> (),
 	setPriority: (self: Group, priority: number) -> (),
-
 	isItemInside: (self: Group, trackable: Trackable) -> boolean,
 	isPointInside: (self: Group, position: Vector3) -> boolean,
 	isItemTracked: (self: Group, trackable: Trackable) -> boolean,
-
 	getTrackedItems: (self: Group) -> { Trackable },
 	getItemsInside: (self: Group) -> { Trackable },
 	getZones: (self: Group) -> { Zone },
-
+	destroy: (self: Group) -> (),
 	onEntered: (self: Group, callback: Callback) -> () -> (),
 	onExited: (self: Group, callback: Callback) -> () -> (),
 
-	UID: number,
+	UID: UID,
 }
 
--- Globals --
 local objects: { Geometry.BoundingVolume } = {}
 local nextZoneId: number = 1
 local nextGroupId: number = 1
 
-local trackables: { [Trackable]: TrackableData } = {}
-local trackableCustomData: { [Trackable]: { [number]: any } } = {}
+local trackables: { [Trackable]: TrackableData } = setmetatable({}, { __mode = "k" }) :: any
+local trackableCustomData: { [Trackable]: { [number]: any } } = setmetatable({}, { __mode = "k" }) :: any
 
--- Maps Group UID -> Set of Trackables currently INSIDE that group
 local groupActiveMembers: { [number]: { [Trackable]: boolean } } = {}
-
 local groupPriorityMap: { [number]: number } = {}
 local groupEnteredCallbacks: { [number]: { any } } = {}
 local groupExitedCallbacks: { [number]: { any } } = {}
@@ -171,9 +167,9 @@ end
 
 local function newZoneFromPart(part: BasePart): Zone
 	local shape: Geometry.ShapeType = "Block"
-	if part.Shape == Enum.PartType.Ball then
+	if (part :: any).Shape == Enum.PartType.Ball then
 		shape = "Ball"
-	elseif part.Shape == Enum.PartType.Cylinder then
+	elseif (part :: any).Shape == Enum.PartType.Cylinder then
 		shape = "Cylinder"
 	end
 
@@ -242,15 +238,13 @@ function Group:untrackItem(trackable: Trackable)
 		return
 	end
 
-	-- Handle exit logic
+	-- Exit logic
 	local oldZoneIdx = data.activeGroupMemberships[self.UID]
 	if oldZoneIdx then
-		-- Update Active Members Cache
 		if groupActiveMembers[self.UID] then
 			groupActiveMembers[self.UID][trackable] = nil
 		end
 
-		-- Fire Callback
 		local cbs = groupExitedCallbacks[self.UID]
 		if cbs then
 			local z = zoneIndexToZoneObj[oldZoneIdx]
@@ -308,7 +302,6 @@ function Group:getTrackedItems(): { Trackable }
 end
 
 function Group:getItemsInside(): { Trackable }
-	-- Now O(N) where N is items inside, instead of all items
 	local members = groupActiveMembers[self.UID]
 	if not members then
 		return {}
@@ -374,6 +367,32 @@ function Group:onExited(callback)
 	end
 end
 
+function Group:destroy()
+	local uid = self.UID
+
+	for _, watchingList in pairs(zoneWatchingGroups) do
+		local idx = table.find(watchingList, uid)
+		while idx do
+			table.remove(watchingList, idx)
+			idx = table.find(watchingList, uid)
+		end
+	end
+
+	for t, data in pairs(trackables) do
+		if data.memberOfGroups[uid] then
+			self:untrackItem(t)
+		end
+	end
+
+	groupPriorityMap[uid] = nil
+	groupEnteredCallbacks[uid] = nil
+	groupExitedCallbacks[uid] = nil
+	groupActiveMembers[uid] = nil
+	groupUIDToGroupObj[uid] = nil
+
+	isDirty = true
+end
+
 local function fireCallback(callbacks, trackable, zone, customData)
 	if not callbacks then
 		return
@@ -383,7 +402,6 @@ local function fireCallback(callbacks, trackable, zone, customData)
 	end
 end
 
--- Loop Buffers --
 local candidatePriority = table.create(16)
 local candidateIndex = table.create(16)
 local candidateList = table.create(16)
@@ -408,7 +426,6 @@ RunService.Heartbeat:Connect(function()
 	isDirty = false
 
 	for trackable, data in trackables do
-		-- 1. Update Position
 		local pos
 		local strategy = data.strategy
 		if strategy == STRATEGY.POS then
@@ -430,7 +447,6 @@ RunService.Heartbeat:Connect(function()
 		data.lastPosition = pos
 		data.isDirty = false
 
-		-- 2. Query Spatial Hash
 		table.clear(candidatePriority)
 		table.clear(candidateIndex)
 		table.clear(candidateList)
@@ -467,17 +483,14 @@ RunService.Heartbeat:Connect(function()
 			end
 		end)
 
-		-- 3. Resolve Transitions
 		local current = data.activeGroupMemberships
 
-		-- Check Exits
+		-- Check exits
 		for gUID, oldZoneIdx in current do
 			local newPri = candidatePriority[gUID]
-			-- If group not in candidates OR new priority is worse than winning priority
 			if not newPri or newPri > lowestWin then
 				current[gUID] = nil
 
-				-- Update Active Cache
 				if groupActiveMembers[gUID] then
 					groupActiveMembers[gUID][trackable] = nil
 				end
@@ -488,7 +501,7 @@ RunService.Heartbeat:Connect(function()
 			end
 		end
 
-		-- Check Entries
+		-- Check entries
 		for i = 1, cCount do
 			local gUID = candidateList[i]
 			local pri = candidatePriority[gUID]
@@ -498,10 +511,6 @@ RunService.Heartbeat:Connect(function()
 					local newZoneIdx = candidateIndex[gUID]
 					current[gUID] = newZoneIdx
 
-					-- Update Active Cache
-					if not groupActiveMembers[gUID] then
-						groupActiveMembers[gUID] = {}
-					end
 					groupActiveMembers[gUID][trackable] = true
 
 					local zone = zoneIndexToZoneObj[newZoneIdx]
@@ -519,18 +528,17 @@ RunService.Heartbeat:Connect(function()
 	debug.profileend()
 end)
 
--- Public API --
 return {
 	-- Constructors
 	newZone = newZone,
 	newZoneFromPart = newZoneFromPart,
 
-	newGroup = function(p)
-		local g = setmetatable({ UID = nextGroupId }, Group)
+	newGroup = function(p: number?)
+		local g = (setmetatable({ UID = nextGroupId }, Group) :: any) :: Group
 		groupPriorityMap[g.UID] = p or 1e6
 		groupEnteredCallbacks[g.UID] = {}
 		groupExitedCallbacks[g.UID] = {}
-		groupActiveMembers[g.UID] = {}
+		groupActiveMembers[g.UID] = setmetatable({}, { __mode = "k" }) :: any
 		groupUIDToGroupObj[g.UID] = g
 		nextGroupId += 1
 		return g
