@@ -509,6 +509,7 @@ local function createGroup(priority: number?): Group
 end
 
 do
+	local lastProcessedPart
 	RunService.Heartbeat:Connect(function(deltaTime)
 		if pendingRebuild then
 			debug.profilebegin("QuickBounds_build")
@@ -526,8 +527,6 @@ do
 		debug.profilebegin("QuickBounds_step")
 
 		local runTime = 0
-		local lastProcessedPart
-		
 		while runTime <= frameBudget do
 			local part, partData = next(partInformation, lastProcessedPart)
 			
