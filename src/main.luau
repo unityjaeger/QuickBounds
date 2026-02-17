@@ -97,11 +97,11 @@ local function getSplitPos(list: {ListItem}, beginIndex: number, endIndex: numbe
 	if (endIndex - beginIndex + 1) < 2 then
 		return nil
 	end
-	
+
 	if endIndex == beginIndex + 1 then
 		return beginIndex + 1
 	end
-	
+
 	local first = list[beginIndex].mortonCode
 	local last  = list[endIndex].mortonCode
 
@@ -127,7 +127,7 @@ local function getSplitPos(list: {ListItem}, beginIndex: number, endIndex: numbe
 			right = m
 		end
 	end
-	
+
 	return left + 1
 end
 
@@ -166,7 +166,7 @@ local function createSubTree(list: {ListItem}, boundsMin: {Vector3}, boundsMax: 
 				id = id
 			}
 		end
-		
+
 		local left = createSubTree(list, boundsMin, boundsMax, beginIndex, mid - 1)
 		local right = createSubTree(list, boundsMin, boundsMax, mid, endIndex)
 		local min, max = unionBounds(left, right)
@@ -288,6 +288,7 @@ type PartData = {
 	memberOfGroups: {[GroupUID]: boolean}
 }
 
+local partCount = 0
 local partInformation: {[BasePart]: PartData} = {}
 local partCustomData: {[BasePart]: {[GroupUID]: any}} = {}
 
@@ -405,6 +406,8 @@ end
 
 local function groupAdd(group: Group, part: BasePart, customData: any?): ()
 	if not partInformation[part] then
+		partCount += 1
+
 		partInformation[part] = {
 			activeGroupMemberships = {},
 			memberOfGroups = {}
@@ -427,6 +430,8 @@ local function groupRemove(group: Group, part: BasePart): ()
 	if not partData then
 		return
 	end
+
+	partCount -= 1
 
 	local previousZoneIndex = partData.activeGroupMemberships[group.UID]
 
@@ -524,15 +529,17 @@ do
 			return
 		end
 
+		local processed = 0
+
 		debug.profilebegin("QuickBounds_step")
 
 		local runTime = 0
-		while runTime <= frameBudget do
+		while runTime <= frameBudget and processed < partCount do
 			local part, partData = next(partInformation, lastProcessedPart)
-			
+
 			lastProcessedPart = part
 			if not lastProcessedPart then
-				break
+				continue
 			end
 
 			local startTime = os.clock()
@@ -652,6 +659,8 @@ do
 
 			local endTime = os.clock()
 			runTime += (endTime - startTime)
+
+			processed += 1
 		end
 
 		debug.profileend()
